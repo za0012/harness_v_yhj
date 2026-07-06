@@ -7,7 +7,7 @@
       "kind": "validation",
       "summary": "Compile Python harness files.",
       "shell": "cmd",
-      "command": "C:\\Users\\yhj\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe -m py_compile skills\\agent-flight-recorder\\scripts\\trace_tools.py mcp\\flight-recorder\\server.py hooks\\hook_event.py runner\\supervisor.py",
+      "command": "C:\\Users\\yhj\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe -m py_compile skills\\agent-flight-recorder\\scripts\\trace_tools.py mcp\\flight-recorder\\server.py hooks\\hook_event.py runner\\supervisor.py runner\\adapters\\codex_adapter.py runner\\adapters\\desktop_thread_bridge.py",
       "required": true
     },
     {
@@ -27,13 +27,12 @@
       "required": true
     },
     {
-      "id": "pnpm-build-via-bash",
+      "id": "typescript-build",
       "kind": "validation",
-      "summary": "Install and build frontend through bash only.",
-      "shell": "bash",
-      "command": "cd /c/Users/yhj/Documents/하네스 && pnpm install && pnpm run build",
-      "required": false,
-      "allow_blocked": true
+      "summary": "Build TypeScript project without invoking pnpm from PowerShell.",
+      "shell": "cmd",
+      "command": "C:\\Users\\yhj\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe node_modules\\typescript\\bin\\tsc -b",
+      "required": true
     }
   ]
 }

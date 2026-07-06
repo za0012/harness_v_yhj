@@ -7,6 +7,7 @@ const root = path.resolve(__dirname, "..");
 const runsDir = path.join(root, ".harness", "runs");
 const traceTool = path.join(root, "skills", "agent-flight-recorder", "scripts", "trace_tools.py");
 const supervisorTool = path.join(root, "runner", "supervisor.py");
+const captureTool = path.join(root, "runner", "adapters", "codex_capture.py");
 const fallbackPython = path.join(
   process.env.USERPROFILE || "",
   ".cache",
@@ -57,6 +58,10 @@ function runTraceTool(args) {
 
 function runSupervisor(args) {
   return runPython(supervisorTool, args);
+}
+
+function runCapture(args) {
+  return runPython(captureTool, args);
 }
 
 async function readJsonl(filePath) {
@@ -160,10 +165,42 @@ app.whenReady().then(() => {
   ipcMain.handle("flight:recommend", async (_event, payload) => {
     return runTraceTool(["recommend", "--run-id", payload.runId, "--task", payload.task]);
   });
+  ipcMain.handle("flight:compareRuns", async (_event, payload) => {
+    return runTraceTool([
+      "compare",
+      "--before-run-id",
+      payload.beforeRunId,
+      "--after-run-id",
+      payload.afterRunId,
+    ]);
+  });
+  ipcMain.handle("flight:importTranscript", async (_event, payload) => {
+    const importsDir = path.join(root, ".harness", "imports");
+    await fs.mkdir(importsDir, { recursive: true });
+    const inputFile = path.join(importsDir, `codex-${Date.now()}.txt`);
+    await fs.writeFile(inputFile, payload.text || "", "utf8");
+    const args = [
+      "--input",
+      inputFile,
+      "--slug",
+      payload.slug || "codex-import",
+      "--source",
+      payload.source || "codex-transcript",
+    ];
+    if (payload.mission) args.push("--mission", payload.mission);
+    if (payload.runId) args.push("--run-id", payload.runId);
+    return runCapture(args);
+  });
   ipcMain.handle("flight:startSupervisor", async (_event, payload) => {
     const args = ["start", "--slug", payload.slug, "--mission", payload.mission];
     if (payload.planFile) args.push("--plan-file", payload.planFile);
     if (payload.noResume) args.push("--no-resume");
+    return runSupervisor(args);
+  });
+  ipcMain.handle("flight:startAutopilot", async (_event, payload) => {
+    const args = ["autopilot", "--slug", payload.slug, "--mission", payload.mission];
+    if (payload.planFile) args.push("--plan-file", payload.planFile);
+    if (payload.maxCycles) args.push("--max-cycles", String(payload.maxCycles));
     return runSupervisor(args);
   });
   ipcMain.handle("flight:resumeSupervisor", async (_event, runId) => {

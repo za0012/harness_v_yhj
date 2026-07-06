@@ -1,12 +1,14 @@
 export type EventType =
   | "mission"
   | "prompt"
+  | "model_response"
   | "tool_call"
   | "tool_result"
   | "error"
   | "retry"
   | "decision"
   | "validation"
+  | "metric"
   | "outcome";
 
 export type TraceEvent = {
@@ -31,18 +33,60 @@ export type Analysis = {
   event_count: number;
   event_counts: Record<string, number>;
   tool_call_count: number;
+  prompt_count?: number;
+  model_response_count?: number;
   error_count: number;
   retry_count: number;
   validation_count: number;
+  metric_count?: number;
+  metric_totals?: {
+    duration_ms: number;
+    token_count: number;
+    cost_estimated: number;
+    user_intervention_count: number;
+    success: boolean | null;
+  };
   risks: string[];
+  diagnosis_issues?: DiagnosisIssue[];
   last_event: TraceEvent | null;
+};
+
+export type DiagnosisIssue = {
+  id: string;
+  severity: "low" | "medium" | "high" | string;
+  title: string;
+  evidence: string;
+  recommendation: string;
 };
 
 export type Recommendation = {
   run_id: string;
+  source_mission?: string;
+  evidence?: string[];
   diagnosis: string[];
+  diagnosis_issues?: DiagnosisIssue[];
+  system_prompt?: string;
+  user_prompt?: string;
+  tool_policy?: string[];
+  validation_checklist?: string[];
+  retry_strategy?: string[];
+  copy_prompt?: string;
   recommended_prompt: string;
   verification_checklist: string[];
+};
+
+export type ComparisonMetric = {
+  metric: string;
+  before: unknown;
+  after: unknown;
+};
+
+export type ComparisonResult = {
+  before_run_id: string;
+  after_run_id: string;
+  metrics: ComparisonMetric[];
+  before: Analysis;
+  after: Analysis;
 };
 
 export type RunDetail = {
@@ -51,6 +95,13 @@ export type RunDetail = {
   analysis: Analysis | null;
   recommendation: Recommendation | null;
   state?: SupervisorState | null;
+};
+
+export type ImportResult = {
+  run_id: string;
+  events_imported: number;
+  analysis: Analysis;
+  recommendation: Recommendation;
 };
 
 export type SupervisorStatus =

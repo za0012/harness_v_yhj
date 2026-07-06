@@ -1,0 +1,54 @@
+{
+  "mission": "Run the product autopilot checks for Tool-Use Flight Recorder + Prompt Recommender.",
+  "max_recovery_attempts": 1,
+  "steps": [
+    {
+      "id": "inspect-working-tree",
+      "kind": "command",
+      "summary": "Inspect current changed files before validation.",
+      "shell": "cmd",
+      "command": "git status --short",
+      "required": false
+    },
+    {
+      "id": "compile-harness",
+      "kind": "validation",
+      "summary": "Compile Python harness and adapter files.",
+      "shell": "cmd",
+      "command": "C:\\Users\\yhj\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe -m py_compile skills\\agent-flight-recorder\\scripts\\trace_tools.py mcp\\flight-recorder\\server.py hooks\\hook_event.py runner\\supervisor.py runner\\adapters\\codex_adapter.py runner\\adapters\\desktop_thread_bridge.py runner\\adapters\\codex_capture.py runner\\tests\\acceptance.py",
+      "required": true
+    },
+    {
+      "id": "acceptance-product-flow",
+      "kind": "validation",
+      "summary": "Run log import, diagnosis, recommendation, and comparison acceptance checks.",
+      "shell": "cmd",
+      "command": "C:\\Users\\yhj\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe runner\\tests\\acceptance.py",
+      "required": true
+    },
+    {
+      "id": "check-electron-entrypoints",
+      "kind": "validation",
+      "summary": "Check Electron CommonJS entrypoints.",
+      "shell": "cmd",
+      "command": "C:\\Users\\yhj\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe --check electron\\main.cjs",
+      "required": true
+    },
+    {
+      "id": "check-electron-preload",
+      "kind": "validation",
+      "summary": "Check Electron preload bridge.",
+      "shell": "cmd",
+      "command": "C:\\Users\\yhj\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe --check electron\\preload.cjs",
+      "required": true
+    },
+    {
+      "id": "build-typescript",
+      "kind": "validation",
+      "summary": "Run TypeScript build through the bundled Node runtime.",
+      "shell": "cmd",
+      "command": "C:\\Users\\yhj\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe node_modules\\typescript\\bin\\tsc -b",
+      "required": true
+    }
+  ]
+}

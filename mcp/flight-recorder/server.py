@@ -15,6 +15,7 @@ sys.path.insert(0, str(TRACE_TOOLS))
 sys.path.insert(0, str(RUNNER_TOOLS))
 
 from trace_tools import analyze, append_event, init_run, read_events, recommend  # noqa: E402
+from adapters.codex_capture import import_transcript  # noqa: E402
 from supervisor import create_run as create_supervisor_run  # noqa: E402
 from supervisor import read_json as read_supervisor_json  # noqa: E402
 from supervisor import resume as resume_supervisor_run  # noqa: E402
@@ -79,6 +80,21 @@ TOOLS = [
         },
     },
     {
+        "name": "import_codex_transcript",
+        "description": "Import Codex-style transcript text into a flight-recorder run.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "mission": {"type": "string"},
+                "run_id": {"type": "string"},
+                "slug": {"type": "string"},
+                "source": {"type": "string"},
+            },
+            "required": ["text"],
+        },
+    },
+    {
         "name": "start_supervisor",
         "description": "Create and run a resumable autonomous supervisor plan.",
         "inputSchema": {
@@ -139,6 +155,16 @@ def handle(method: str, params: dict) -> dict:
             return content(recommend(args["run_id"], args["task"]))
         if name == "list_events":
             return content(read_events(args["run_id"]))
+        if name == "import_codex_transcript":
+            return content(
+                import_transcript(
+                    args["text"],
+                    args.get("mission"),
+                    args.get("run_id"),
+                    args.get("slug") or "codex-import",
+                    args.get("source") or "mcp-codex-transcript",
+                )
+            )
         if name == "start_supervisor":
             created = create_supervisor_run(args["mission"], args["slug"], args.get("plan_file"))
             return content(created if args.get("no_resume") else resume_supervisor_run(created["run_id"]))

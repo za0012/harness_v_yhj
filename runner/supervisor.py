@@ -20,7 +20,7 @@ TRACE_TOOLS = ROOT / "skills" / "agent-flight-recorder" / "scripts"
 ADAPTERS_DIR = ROOT / "runner" / "adapters"
 sys.path.insert(0, str(TRACE_TOOLS))
 
-from trace_tools import analyze, append_event, init_run, recommend, run_dir, write_json  # noqa: E402
+from trace_tools import analyze, append_event, init_run, recommend, record_metric, record_model_response, record_prompt, run_dir, write_json  # noqa: E402
 
 
 DEFAULT_TIMEOUT_SECONDS = 120
@@ -484,6 +484,93 @@ def resume(run_id: str) -> dict[str, Any]:
     return finish(run_id, state, "completed", "Supervisor completed all required steps.")
 
 
+def autopilot(mission: str, slug: str, plan_file: str | None, max_cycles: int) -> dict[str, Any]:
+    started_at = datetime.now(timezone.utc)
+    created = create_run(mission, slug, plan_file)
+    run_id = created["run_id"]
+    record_prompt(
+        run_id,
+        "system",
+        (
+            "You are an autonomous supervisor for Tool-Use Flight Recorder + Prompt Recommender. "
+            "Do not run destructive commands without explicit approval. "
+            "Record tool calls, tool results, errors, retries, validation, metrics, and outcome. "
+            "Final output must include changed artifacts, validation evidence, and residual risks."
+        ),
+        prompt_kind="autopilot-system",
+        source="supervisor",
+    )
+    record_prompt(
+        run_id,
+        "user",
+        (
+            f"Mission: {mission}\n\n"
+            "Success criteria:\n"
+            "- Finish the validation plan without user intervention when possible.\n"
+            "- Preserve a timeline of decisions, tool calls, tool results, validation, metrics, and final outcome.\n"
+            "- Generate prompt diagnosis and a recommended next-run prompt.\n"
+            "- Stop only when completed, failed, blocked, or max cycles are exhausted.\n\n"
+            "Output format:\n"
+            "- status\n"
+            "- completed steps\n"
+            "- validation evidence\n"
+            "- remaining risks"
+        ),
+        prompt_kind="autopilot-user",
+        source="supervisor",
+    )
+    record_model_response(
+        run_id,
+        "Autopilot plan accepted. The supervisor will execute the configured plan, resume until terminal state, analyze the trace, and recommend a stronger prompt.",
+        source="supervisor",
+    )
+    append_event(
+        run_id,
+        "decision",
+        "Autopilot started. The supervisor will keep resuming until a terminal state is reached.",
+        {"max_cycles": max_cycles},
+    )
+
+    result: dict[str, Any] = created
+    for cycle in range(1, max_cycles + 1):
+        result = resume(run_id)
+        state = result.get("state", {})
+        append_event(
+            run_id,
+            "decision",
+            f"Autopilot cycle {cycle} finished with status {state.get('status')}.",
+            {"cycle": cycle, "status": state.get("status")},
+        )
+        if state.get("status") in TERMINAL_STATES:
+            break
+    else:
+        state = read_json(state_path(run_id), {})
+        state["status"] = "blocked"
+        append_event(
+            run_id,
+            "error",
+            "Autopilot stopped because max cycles were exhausted before a terminal state.",
+            {"max_cycles": max_cycles},
+        )
+        write_state(run_id, state)
+        result = {"run_id": run_id, "state": state}
+
+    ended_at = datetime.now(timezone.utc)
+    duration_ms = int((ended_at - started_at).total_seconds() * 1000)
+    final_state = result.get("state", {})
+    record_metric(
+        run_id,
+        duration_ms=duration_ms,
+        token_count=None,
+        cost_estimated=None,
+        user_intervention_count=0,
+        success=final_state.get("status") == "completed",
+    )
+    result["analysis"] = analyze(run_id)
+    result["recommendation"] = recommend(run_id, mission)
+    return result
+
+
 def list_states() -> dict[str, Any]:
     runs = []
     runs_root = ROOT / ".harness" / "runs"
@@ -508,6 +595,12 @@ def main() -> None:
     start.add_argument("--plan-file")
     start.add_argument("--no-resume", action="store_true")
 
+    auto_parser = sub.add_parser("autopilot")
+    auto_parser.add_argument("--mission", required=True)
+    auto_parser.add_argument("--slug", default="autopilot")
+    auto_parser.add_argument("--plan-file")
+    auto_parser.add_argument("--max-cycles", type=int, default=5)
+
     resume_parser = sub.add_parser("resume")
     resume_parser.add_argument("--run-id", required=True)
 
@@ -521,6 +614,8 @@ def main() -> None:
         result = create_run(args.mission, args.slug, args.plan_file)
         if not args.no_resume:
             result = resume(result["run_id"])
+    elif args.command == "autopilot":
+        result = autopilot(args.mission, args.slug, args.plan_file, args.max_cycles)
     elif args.command == "resume":
         result = resume(args.run_id)
     elif args.command == "state":
