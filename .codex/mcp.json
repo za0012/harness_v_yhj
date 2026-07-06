@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "flight-recorder": {
+      "command": "C:/Users/yhj/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe",
+      "args": [
+        "C:/Users/yhj/Documents/\uD558\uB124\uC2A4/mcp/flight-recorder/server.py"
+      ],
+      "env": {
+        "FLIGHT_RECORDER_DIR": "C:/Users/yhj/Documents/\uD558\uB124\uC2A4/.harness/runs"
+      }
+    }
+  }
+}

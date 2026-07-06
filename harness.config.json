@@ -1,0 +1,26 @@
+{
+  "name": "agent-flight-recorder-harness",
+  "storage": ".harness/runs",
+  "skill": "skills/agent-flight-recorder",
+  "agent_profile": "agents/autonomous-flight-recorder.md",
+  "mcp_server": "mcp/flight-recorder/server.py",
+  "supervisor": "runner/supervisor.py",
+  "roadmap": "ROADMAP.md",
+  "recording_mode": "near_realtime",
+  "plans": {
+    "frontend_build": "runner/plans/frontend-build.json",
+    "agent_loop_demo": "runner/plans/agent-loop-demo.json",
+    "desktop_thread_demo": "runner/plans/desktop-thread-demo.json"
+  },
+  "hooks": {
+    "pre_tool_use": "hooks/pre-tool-use.cmd",
+    "post_tool_use": "hooks/post-tool-use.cmd",
+    "session_outcome": "hooks/session-outcome.cmd"
+  },
+  "autonomy": {
+    "complete_without_interruption": true,
+    "max_recovery_attempts_per_failure": 2,
+    "fallback": "finish the smallest useful local version and record the blocker",
+    "package_shell": "bash"
+  }
+}

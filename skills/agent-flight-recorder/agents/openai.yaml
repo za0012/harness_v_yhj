@@ -1,0 +1,12 @@
+interface:
+  display_name: "Agent Flight Recorder"
+  short_description: "Record agent runs and improve prompts."
+  default_prompt: "Use $agent-flight-recorder to record this run, inspect the tool timeline, and recommend a stronger prompt."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "flight-recorder"
+      description: "Local MCP server for recording, analyzing, and recommending prompts from agent traces."
+      transport: "stdio"
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,27 @@
+{
+  "mission": "Prove the supervisor can hand work to an agent adapter and continue autonomously.",
+  "max_recovery_attempts": 1,
+  "steps": [
+    {
+      "id": "agent-draft",
+      "kind": "agent",
+      "summary": "Ask the Codex adapter to produce an agent output artifact.",
+      "adapter": "codex",
+      "mode": "mock",
+      "required": true,
+      "success_criteria": [
+        "Adapter receives a prompt file.",
+        "Adapter writes an output artifact.",
+        "Supervisor records the adapter result."
+      ]
+    },
+    {
+      "id": "python-harness-compile",
+      "kind": "validation",
+      "summary": "Compile Python harness files after agent run.",
+      "shell": "cmd",
+      "command": "C:\\Users\\yhj\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe -m py_compile skills\\agent-flight-recorder\\scripts\\trace_tools.py mcp\\flight-recorder\\server.py hooks\\hook_event.py runner\\supervisor.py runner\\adapters\\codex_adapter.py",
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "mission": "Prove the supervisor can pause for a Codex Desktop thread and resume after response.",
+  "max_recovery_attempts": 1,
+  "steps": [
+    {
+      "id": "desktop-thread-agent",
+      "kind": "agent",
+      "summary": "Ask a Codex Desktop thread to produce an agent output artifact.",
+      "adapter": "codex",
+      "mode": "desktop-thread",
+      "required": true,
+      "success_criteria": [
+        "Adapter creates a desktop-thread request.json.",
+        "A Codex Desktop thread can execute the prompt.",
+        "Supervisor resumes after response.json exists."
+      ]
+    },
+    {
+      "id": "python-harness-compile",
+      "kind": "validation",
+      "summary": "Compile Python harness files after desktop thread response.",
+      "shell": "cmd",
+      "command": "C:\\Users\\yhj\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe -m py_compile skills\\agent-flight-recorder\\scripts\\trace_tools.py mcp\\flight-recorder\\server.py hooks\\hook_event.py runner\\supervisor.py runner\\adapters\\codex_adapter.py runner\\adapters\\desktop_thread_bridge.py",
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "mission": "Validate the React + Vite + Electron Flight Recorder frontend.",
+  "max_recovery_attempts": 1,
+  "steps": [
+    {
+      "id": "python-harness-compile",
+      "kind": "validation",
+      "summary": "Compile Python harness files.",
+      "shell": "cmd",
+      "command": "C:\\Users\\yhj\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe -m py_compile skills\\agent-flight-recorder\\scripts\\trace_tools.py mcp\\flight-recorder\\server.py hooks\\hook_event.py runner\\supervisor.py",
+      "required": true
+    },
+    {
+      "id": "electron-main-check",
+      "kind": "validation",
+      "summary": "Check Electron main process syntax.",
+      "shell": "cmd",
+      "command": "C:\\Users\\yhj\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe --check electron\\main.cjs",
+      "required": true
+    },
+    {
+      "id": "electron-preload-check",
+      "kind": "validation",
+      "summary": "Check Electron preload syntax.",
+      "shell": "cmd",
+      "command": "C:\\Users\\yhj\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe --check electron\\preload.cjs",
+      "required": true
+    },
+    {
+      "id": "pnpm-build-via-bash",
+      "kind": "validation",
+      "summary": "Install and build frontend through bash only.",
+      "shell": "bash",
+      "command": "cd /c/Users/yhj/Documents/하네스 && pnpm install && pnpm run build",
+      "required": false,
+      "allow_blocked": true
+    }
+  ]
+}
