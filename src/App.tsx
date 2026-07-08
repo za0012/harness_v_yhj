@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   Sparkles,
   TerminalSquare,
+  Trash2,
   Upload,
   WandSparkles,
 } from "lucide-react";
@@ -26,38 +27,51 @@ import { useEffect, useMemo, useState } from "react";
 import {
   analyzeRun,
   compareRuns,
+  deleteRun,
+  getLiveWatcherStatus,
   getRun,
+  importLatestCodexThread,
   importTranscript,
+  listCodexThreads,
   listRuns,
   recommendPrompt,
   resumeSupervisor,
   startAutopilot,
+  startLiveWatcher,
+  stopLiveWatcher,
 } from "./api";
 import type {
   Analysis,
+  CodexThreadSummary,
   ComparisonResult,
   DiagnosisIssue,
   EventType,
+  LiveWatcherStatus,
   Recommendation,
   RunDetail,
   RunSummary,
   TraceEvent,
 } from "./types";
 
-type TabId = "capture" | "records" | "recommend" | "compare" | "how" | "patch";
+type TabId = "import" | "records" | "recommend" | "compare" | "notes";
+type ImportMode = "codex" | "paste";
+type NotesMode = "how" | "patch";
 
 const tabs: Array<{ id: TabId; label: string }> = [
-  { id: "capture", label: "로그 가져오기" },
   { id: "records", label: "실행 기록" },
   { id: "recommend", label: "프롬프트 추천" },
   { id: "compare", label: "Before / After" },
-  { id: "how", label: "동작 방식" },
-  { id: "patch", label: "패치노트" },
+];
+
+const sidebarTabs: Array<{ id: TabId; label: string }> = [
+  { id: "import", label: "가져오기" },
+  { id: "records", label: "실행 목록" },
+  { id: "notes", label: "작업 노트" },
 ];
 
 const eventLabels: Record<EventType, string> = {
-  mission: "목표 저장",
-  prompt: "프롬프트 기록",
+  mission: "목표 기록",
+  prompt: "프롬프트",
   model_response: "모델 응답",
   tool_call: "도구 호출",
   tool_result: "도구 결과",
@@ -113,34 +127,44 @@ const diagnosisItems = [
   "역할과 제약이 너무 많이 섞임",
 ];
 
-const autopilotSteps = [
-  "Codex 실행 로그나 자율 실행 결과를 run으로 만든다.",
-  "run 안의 이벤트를 시간순 타임라인으로 재생한다.",
-  "진단기가 누락된 목표, 검증, 도구 정책, outcome을 찾는다.",
-  "추천기가 실제 이슈와 근거를 넣어 다음 실행용 프롬프트를 만든다.",
-  "Before/After는 두 run의 성공률, 도구 호출, 오류, 비용, 시간, 사용자 개입을 비교한다.",
+const productFlow = [
+  "Codex Desktop live watcher, rollout import, 붙여넣은 로그, supervisor 실행을 모두 같은 run 형식으로 저장합니다.",
+  "run에는 목표, 프롬프트, 모델 응답, 도구 호출/결과, 오류, 재시도, 검증, 토큰, 비용, 최종 결과가 쌓입니다.",
+  "타임라인은 에이전트가 무엇을 읽고, 어떤 도구를 호출하고, 어디서 실패하거나 검증했는지 시간순으로 보여줍니다.",
+  "프롬프트 진단은 목표, 성공 조건, 금지 행동, 출력 형식, 도구 정책, 검증 단계가 빠졌는지 찾습니다.",
+  "추천 프롬프트는 선택한 run의 실제 오류, 검증 누락, 사용 도구, 지표를 근거로 다시 작성됩니다.",
+  "Before/After는 두 run의 성공 여부, 도구 호출 수, 오류 수, 비용, 시간, 사용자 개입을 비교합니다.",
+];
+
+const packagedAppFlow = [
+  "외부 PC에서 exe를 실행해도 앱은 dev server를 보지 않고 패키지 안의 dist/index.html을 열어야 합니다.",
+  "Codex 대화는 클라우드에서 가져오지 않습니다. 실행 중인 PC의 로컬 Codex 데이터 폴더를 읽습니다.",
+  "기본 위치는 %USERPROFILE%\\.codex\\state_5.sqlite입니다. 여기서 thread 목록과 rollout JSONL 경로를 찾습니다.",
+  "선택한 thread의 rollout_path가 가리키는 JSONL에서 prompt, response, tool call/result, outcome을 변환합니다.",
+  "실시간 감시는 rollout JSONL의 byte offset을 저장하고 새 줄이 생길 때 같은 run에 append합니다.",
+  "외부 PC에 Codex Desktop/CLI 기록이 없거나 .codex 접근 권한이 없으면 목록은 비어 있을 수 있습니다.",
 ];
 
 const patchNotes = [
   {
-    title: "제품 방향 재정렬",
-    body: "무중단 하네스는 제품이 아니라 개발과 검증을 자동화하는 내부 엔진으로 정리했습니다. 화면의 중심은 실행 기록, 타임라인, 진단, 추천, 비교입니다.",
+    title: "2026.07.08 · dev 빈 화면 복구",
+    body: "깨진 UTF-8 문자열이 JSX와 TypeScript 문법까지 깨뜨려 Electron dev 창이 빈 화면으로 남던 문제를 정상 한국어 UI와 유효한 컴포넌트 구조로 복구했습니다.",
   },
   {
-    title: "Codex 로그 가져오기 추가",
-    body: "Codex 출력, 터미널 로그, 대화 로그를 붙여넣으면 run으로 변환하고 분석과 추천까지 생성합니다. 이후 자동 훅은 같은 adapter에 입력만 연결하면 됩니다.",
+    title: "2026.07.08 · 가져오기 UX 정리",
+    body: "Codex 대화 목록을 먼저 고르고 가져오기/실시간 감시 중 하나를 선택하는 흐름으로 정리했습니다. 로컬 state_5.sqlite와 rollout JSONL을 읽는다는 제한도 화면에 명시했습니다.",
   },
   {
-    title: "추천기 개선",
-    body: "추천 프롬프트가 단순 템플릿 복붙이 아니라 이벤트 수, 오류 수, 검증 누락, outcome 누락 같은 실제 run 근거를 반영합니다.",
+    title: "2026.07.08 · 추천 근거 강화",
+    body: "추천 화면에서 원본 프롬프트 발췌, run evidence, 진단 이슈, 개선 이유, 복사용 프롬프트를 함께 보여주도록 정리했습니다.",
   },
   {
-    title: "깨진 문구 제거",
-    body: "기본 데모 데이터와 trace 진단 문구를 정상 한국어로 교체했습니다. 오래된 run에 남은 깨진 로그는 원본 보존을 위해 그대로 두되 새 run은 정상 저장됩니다.",
+    title: "2026.07.07 · 외부 exe 기준",
+    body: "packaged runtime에서는 resources/app 내부가 아니라 패키지된 dist/index.html을 loadFile 하도록 분기해 외부 PC 빈 화면 가능성을 줄였습니다.",
   },
   {
-    title: "검증 루프 보강",
-    body: "Python compile, TypeScript build, Electron entrypoint check, acceptance test가 제품 하네스 검증 루틴에 들어갑니다.",
+    title: "2026.07.07 · slim portable 배포",
+    body: "electron-builder dir 빌드의 EPERM rename 이슈를 피하기 위해 prepackaged 폴더를 만든 뒤 portable exe를 생성하는 경로를 사용합니다.",
   },
 ];
 
@@ -159,31 +183,65 @@ function formatDuration(ms: unknown) {
   if (ms < 1000) return `${ms}ms`;
   const seconds = Math.round(ms / 1000);
   if (seconds < 60) return `${seconds}초`;
-  return `${Math.floor(seconds / 60)}분 ${seconds % 60}초`;
+  const minutes = Math.floor(seconds / 60);
+  const restSeconds = seconds % 60;
+  if (minutes < 60) return `${minutes}분 ${restSeconds}초`;
+  const hours = Math.floor(minutes / 60);
+  const restMinutes = minutes % 60;
+  return `${hours}시간 ${restMinutes}분`;
 }
 
 function formatMetric(metric: string, value: unknown) {
   if (metric === "duration_ms") return formatDuration(value);
-  if (metric === "cost_estimated" && typeof value === "number") return `$${value.toFixed(2)}`;
+  if (metric === "cost_estimated" && typeof value === "number") return `$${value.toFixed(4)}`;
   if (metric === "success") return value === true ? "성공" : value === false ? "실패" : "-";
   if (value === null || value === undefined || value === "") return "-";
   return String(value);
 }
 
 function textLooksBroken(value: unknown): boolean {
-  if (typeof value === "string") return /[�]|占|揶|疫|筌|獄|野/.test(value);
+  if (typeof value === "string") return /[\uFFFD\u5360]{2,}|[?]{4,}|[媛-힣][\uFFFD]/.test(value);
   if (Array.isArray(value)) return value.some((item) => textLooksBroken(item));
   if (value && typeof value === "object") return Object.values(value).some((item) => textLooksBroken(item));
   return false;
 }
 
-function safeText(value: string | undefined | null, fallback = "오래된 로그의 문자가 깨져 표시를 생략했습니다.") {
+function safeText(value: string | undefined | null, fallback = "이전 로그의 깨진 문자열은 표시를 생략했습니다.") {
   if (!value) return fallback;
   return textLooksBroken(value) ? fallback : value;
 }
 
 function copyText(text: string) {
   void navigator.clipboard?.writeText(text);
+}
+
+function firstUsefulLine(value: string) {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean) ?? "내용 없음";
+}
+
+function promptContent(event: TraceEvent) {
+  const data = event.data ?? {};
+  return typeof data.content === "string" ? data.content : event.summary;
+}
+
+function roleName(event: TraceEvent) {
+  if (event.type === "model_response") return "모델";
+  const role = typeof event.data?.role === "string" ? event.data.role : "unknown";
+  if (role === "user") return "사용자";
+  if (role === "system") return "시스템";
+  if (role === "developer") return "개발자";
+  return role;
+}
+
+function sourceName(event: TraceEvent) {
+  const source = typeof event.data?.source === "string" ? event.data.source : "";
+  if (source === "codex-rollout") return "Codex 대화";
+  if (source === "codex-live") return "실시간 감시";
+  if (source === "conversation") return "대화";
+  return source || event.type;
 }
 
 function Panel({ children, className = "" }: { children: ReactNode; className?: string }) {
@@ -214,12 +272,18 @@ function StatusBadge({ busy }: { busy: boolean }) {
 function RunSidebar({
   runs,
   selectedRunId,
+  activeTab,
+  onTabChange,
   onSelect,
+  onDelete,
   onRefresh,
 }: {
   runs: RunSummary[];
   selectedRunId: string | null;
+  activeTab: TabId;
+  onTabChange: (tab: TabId) => void;
   onSelect: (runId: string) => void;
+  onDelete: (runId: string) => void;
   onRefresh: () => void;
 }) {
   return (
@@ -234,21 +298,36 @@ function RunSidebar({
           <RefreshCw size={17} />
         </button>
       </div>
-      <div className="sidebar-note">Codex 로그, 자율 실행, 수동 기록을 모두 하나의 run으로 모아 봅니다.</div>
+      <div className="sidebar-note">Codex 실행, 가져온 로그, 수동 기록을 하나의 run으로 묶어 분석합니다.</div>
+      <div className="sidebar-tabs" aria-label="Run log 내부 화면">
+        {sidebarTabs.map((tab) => (
+          <button className={activeTab === tab.id ? "active" : ""} key={tab.id} onClick={() => onTabChange(tab.id)} type="button">
+            {tab.label}
+          </button>
+        ))}
+      </div>
       <div className="run-list">
         {runs.map((run) => (
-          <button
-            className={run.run_id === selectedRunId ? "run-card active" : "run-card"}
-            key={run.run_id}
-            onClick={() => onSelect(run.run_id)}
-            type="button"
-          >
-            <span>{formatTime(run.updated_at)}</span>
-            <strong>{safeText(run.mission, "제목을 읽을 수 없는 run")}</strong>
-            <small>
-              {run.event_count}개 이벤트 · {safeText(run.outcome, "결과 없음")}
-            </small>
-          </button>
+          <article className={run.run_id === selectedRunId ? "run-card active" : "run-card"} key={run.run_id}>
+            <button className="run-card-main" onClick={() => onSelect(run.run_id)} type="button">
+              <span>{formatTime(run.updated_at)}</span>
+              <strong>{safeText(run.mission, "제목을 읽을 수 없는 run")}</strong>
+              <small>
+                {run.event_count}개 이벤트 · {safeText(run.outcome, "결과 없음")}
+              </small>
+            </button>
+            <button
+              className="run-delete-button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onDelete(run.run_id);
+              }}
+              title="이 run 삭제"
+              type="button"
+            >
+              <Trash2 size={14} />
+            </button>
+          </article>
         ))}
         {runs.length === 0 ? <div className="empty-dark">아직 저장된 실행이 없습니다.</div> : null}
       </div>
@@ -268,6 +347,28 @@ function TabBar({ activeTab, onChange }: { activeTab: TabId; onChange: (tab: Tab
   );
 }
 
+function SegmentedSwitch<T extends string>({
+  value,
+  options,
+  onChange,
+  label,
+}: {
+  value: T;
+  options: Array<{ value: T; label: string }>;
+  onChange: (value: T) => void;
+  label: string;
+}) {
+  return (
+    <div className="segmented-switch" role="group" aria-label={label}>
+      {options.map((option) => (
+        <button className={value === option.value ? "active" : ""} key={option.value} onClick={() => onChange(option.value)} type="button">
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function StatCard({ label, value, icon: Icon, tone = "blue" }: { label: string; value: string | number; icon: LucideIcon; tone?: string }) {
   return (
     <div className={`stat-card ${tone}`}>
@@ -282,11 +383,12 @@ function StatCard({ label, value, icon: Icon, tone = "blue" }: { label: string; 
 
 function timelineTitle(event: TraceEvent) {
   const summary = event.summary || "";
-  if (event.type === "tool_call" && /search|검색/i.test(summary)) return "여기서 검색함";
-  if (event.type === "tool_call" && /read|file|파일|inspect/i.test(summary)) return "여기서 파일 읽음";
-  if (event.type === "error") return "여기서 잘못된 도구 호출";
-  if (event.type === "retry") return "여기서 같은 작업을 다시 시도";
-  if (event.type === "decision" && /intent|의도|scope|범위/i.test(summary)) return "여기서 사용자 의도와 맞는지 판단";
+  if (event.type === "tool_call" && /search|검색/i.test(summary)) return "검색 실행";
+  if (event.type === "tool_call" && /read|file|파일|inspect/i.test(summary)) return "파일 확인";
+  if (event.type === "tool_call") return "도구 호출";
+  if (event.type === "error") return "오류 발생";
+  if (event.type === "retry") return "재시도";
+  if (event.type === "decision" && /intent|의도|scope|범위/i.test(summary)) return "범위 판단";
   return eventLabels[event.type];
 }
 
@@ -328,48 +430,81 @@ function issueTone(issue: DiagnosisIssue) {
   return "ok";
 }
 
-function DiagnosisPanel({ analysis, recommendation }: { analysis: Analysis | null | undefined; recommendation: Recommendation | null }) {
+function PromptSourcePanel({ detail }: { detail: RunDetail | null }) {
+  const prompts = detail?.events.filter((event) => event.type === "prompt") ?? [];
+  const responses = detail?.events.filter((event) => event.type === "model_response") ?? [];
+  const items = [...prompts, ...responses].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  const userPrompts = prompts.filter((event) => event.data?.role === "user").length;
+  const instructionPrompts = prompts.filter((event) => event.data?.role === "system" || event.data?.role === "developer").length;
+
+  return (
+    <Panel>
+      <SectionHeader label="수집된 입력" title="프롬프트와 모델 응답을 역할별로 확인합니다" />
+      <div className="prompt-source-summary">
+        <span>사용자 프롬프트 {userPrompts}개</span>
+        <span>시스템/개발자 지시 {instructionPrompts}개</span>
+        <span>모델 응답 {responses.length}개</span>
+      </div>
+      {items.length ? (
+        <div className="prompt-thread">
+          {items.map((event, index) => {
+            const content = safeText(promptContent(event), "본문 없음");
+            return (
+              <details className={event.type === "model_response" ? "prompt-thread-item model" : "prompt-thread-item"} key={`${event.timestamp}-${index}`}>
+                <summary>
+                  <span>{roleName(event)}</span>
+                  <strong>{firstUsefulLine(content)}</strong>
+                  <small>{sourceName(event)}</small>
+                </summary>
+                <pre>{content}</pre>
+              </details>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="empty-light">이 run에는 아직 프롬프트나 모델 응답이 없습니다.</div>
+      )}
+    </Panel>
+  );
+}
+
+function DiagnosisPanel({ analysis, recommendation }: { analysis: Analysis | null; recommendation: Recommendation | null }) {
   const issues = recommendation?.diagnosis_issues ?? analysis?.diagnosis_issues ?? [];
   const fallback = recommendation?.diagnosis ?? analysis?.risks ?? [];
+
   return (
-    <Panel className="diagnosis-panel">
-      <SectionHeader label="프롬프트 진단" title="이번 실행에서 드러난 약점" />
+    <Panel>
+      <SectionHeader label="진단" title="다음 프롬프트에서 보완할 약점" />
       <div className="diagnosis-template">
         {diagnosisItems.map((item) => (
           <span key={item}>{item}</span>
         ))}
       </div>
-      <div className="issue-list">
-        {issues.length > 0
-          ? issues.map((issue) => (
-              <article className={`issue-card ${issueTone(issue)}`} key={issue.id}>
-                <div>
-                  <span>{issue.severity}</span>
-                  <strong>{safeText(issue.title)}</strong>
-                </div>
-                <p>{safeText(issue.evidence)}</p>
-                <small>{safeText(issue.recommendation)}</small>
-              </article>
-            ))
-          : (fallback.length ? fallback : ["뚜렷한 누락은 보이지 않습니다. 다음 실행에서는 비용과 완료 기준을 더 선명하게 비교하세요."]).map((item) => (
-              <article className="issue-card ok" key={item}>
-                <div>
-                  <span>info</span>
-                  <strong>{safeText(item)}</strong>
-                </div>
-              </article>
-            ))}
-      </div>
+      {issues.length ? (
+        <div className="issue-list">
+          {issues.map((issue) => (
+            <article className={`issue-card ${issueTone(issue)}`} key={issue.id}>
+              <div>
+                <span>{issue.severity}</span>
+                <strong>{safeText(issue.title)}</strong>
+              </div>
+              <p>{safeText(issue.evidence)}</p>
+              <small>{safeText(issue.recommendation)}</small>
+            </article>
+          ))}
+        </div>
+      ) : fallback.length ? (
+        <div className="issue-list">
+          {fallback.map((item) => (
+            <article className="issue-card" key={item}>
+              <strong>{safeText(item)}</strong>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div className="empty-light">분석을 실행하면 진단 결과가 여기에 표시됩니다.</div>
+      )}
     </Panel>
-  );
-}
-
-function PromptBlock({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <article className="prompt-block">
-      <h3>{title}</h3>
-      {children}
-    </article>
   );
 }
 
@@ -383,7 +518,7 @@ function RecommendationPanel({
   onRecommend,
 }: {
   recommendation: Recommendation | null;
-  analysis: Analysis | null | undefined;
+  analysis: Analysis | null;
   selectedRunId: string | null;
   workRequest: string;
   setWorkRequest: (value: string) => void;
@@ -392,123 +527,230 @@ function RecommendationPanel({
 }) {
   const evidence = recommendation?.evidence ?? [];
   const issues = recommendation?.diagnosis_issues ?? analysis?.diagnosis_issues ?? [];
+  const fixes = recommendation?.prompt_fixes ?? [];
+  const copyPrompt = recommendation?.copy_prompt || recommendation?.recommended_prompt || "";
+  const variants = [
+    {
+      title: "실전 실행형",
+      note: "다음 Codex 실행에 바로 붙여넣기 좋은 형태",
+      text: recommendation?.recommended_prompt,
+    },
+    {
+      title: "하네스 관찰형",
+      note: "도구 호출, 오류, 검증 기록을 더 촘촘히 요구",
+      text: recommendation?.user_prompt,
+    },
+    {
+      title: "복구 중심형",
+      note: "실패 원인 분류와 재시도 전략을 강조",
+      text: recommendation?.retry_strategy?.join("\n"),
+    },
+  ];
+
   return (
     <Panel className="recommendation-panel">
       <SectionHeader
-        label="최적 프롬프트 추천"
-        title="선택한 run의 실제 약점을 넣어 다음 프롬프트를 만듭니다"
+        label="Prompt Recommender"
+        title="선택한 run의 실제 로그로 다음 프롬프트를 만듭니다"
         action={
           <button className="primary-button" disabled={disabled || !selectedRunId} onClick={onRecommend} type="button">
             <WandSparkles size={17} />
-            추천 만들기
+            추천 생성
           </button>
         }
       />
-      <div className="notice-box">
-        <Info size={17} />
-        <p>입력한 작업 문장은 추천 프롬프트의 목표로만 들어갑니다. 추천의 차이는 선택한 run의 오류, 검증 누락, outcome 누락 같은 로그 근거에서 나옵니다.</p>
-      </div>
       <label className="field">
-        <span>이번에 맡길 작업</span>
+        <span>다음에 다시 실행할 작업</span>
         <textarea value={workRequest} onChange={(event) => setWorkRequest(event.target.value)} />
       </label>
-      <div className="recommendation-flow">
-        <article>
-          <h3>추천 근거</h3>
-          <ul>
-            {(evidence.length ? evidence : ["아직 추천 근거가 없습니다. 먼저 run을 선택하고 추천을 만드세요."]).map((item) => (
-              <li key={item}>{safeText(item)}</li>
-            ))}
-          </ul>
+      <div className="prompt-planner">
+        <article className="planner-stage">
+          <span>1</span>
+          <div>
+            <strong>근거 수집</strong>
+            <p>이벤트, 오류, 검증, 토큰/비용, outcome을 읽습니다.</p>
+          </div>
         </article>
-        <article>
-          <h3>개선점</h3>
-          <ul>
-            {(issues.length ? issues.map((issue) => issue.title) : ["진단 이슈가 없으면 완료 기준과 검증 형식을 더 선명하게 만듭니다."]).map((item) => (
-              <li key={item}>{safeText(item)}</li>
-            ))}
-          </ul>
+        <article className="planner-stage">
+          <span>2</span>
+          <div>
+            <strong>누락 진단</strong>
+            <p>목표, 성공 조건, 도구 정책, 검증 단계가 비었는지 봅니다.</p>
+          </div>
         </article>
-        <article>
-          <h3>검증 방법</h3>
-          <p>추천이 나아졌는지는 같은 작업을 Before/After로 실행해 성공 여부, 도구 호출 수, 오류 수, 비용, 완료 시간, 사용자 개입 수를 비교합니다.</p>
+        <article className="planner-stage">
+          <span>3</span>
+          <div>
+            <strong>프롬프트 재작성</strong>
+            <p>실패 지점을 줄이는 다음 실행용 프롬프트를 만듭니다.</p>
+          </div>
         </article>
       </div>
       <div className="prompt-grid">
-        <PromptBlock title="에이전트용 시스템 프롬프트">
-          <p>{safeText(recommendation?.system_prompt, "아직 생성된 시스템 프롬프트가 없습니다.")}</p>
-        </PromptBlock>
-        <PromptBlock title="작업별 사용자 프롬프트">
-          <p>{safeText(recommendation?.user_prompt, "아직 생성된 사용자 프롬프트가 없습니다.")}</p>
-        </PromptBlock>
-        <PromptBlock title="도구 사용 정책">
-          <ul>{(recommendation?.tool_policy ?? ["추천을 만들면 도구 사용 기준이 여기에 표시됩니다."]).map((item) => <li key={item}>{safeText(item)}</li>)}</ul>
-        </PromptBlock>
-        <PromptBlock title="검증 체크리스트">
-          <ul>{(recommendation?.validation_checklist ?? ["추천을 만들면 검증 항목이 여기에 표시됩니다."]).map((item) => <li key={item}>{safeText(item)}</li>)}</ul>
-        </PromptBlock>
-        <PromptBlock title="실패 시 재시도 전략">
-          <ul>{(recommendation?.retry_strategy ?? ["추천을 만들면 재시도 전략이 여기에 표시됩니다."]).map((item) => <li key={item}>{safeText(item)}</li>)}</ul>
-        </PromptBlock>
-        <PromptBlock title="바로 실행할 전체 프롬프트">
-          <p>{safeText(recommendation?.recommended_prompt, "아직 생성된 전체 프롬프트가 없습니다.")}</p>
-        </PromptBlock>
+        <div className="prompt-block">
+          <h3>원본 사용자 프롬프트</h3>
+          <p>{safeText(recommendation?.original_user_prompt, "선택한 run에 사용자 프롬프트가 없거나 아직 추천을 생성하지 않았습니다.")}</p>
+        </div>
+        <div className="prompt-block">
+          <h3>실행 근거</h3>
+          <ul>{(evidence.length ? evidence : ["추천을 만들면 이벤트 수, 오류, 검증, 시간/토큰/비용 근거가 여기에 표시됩니다."]).map((item) => <li key={item}>{safeText(item)}</li>)}</ul>
+        </div>
       </div>
-      {recommendation?.copy_prompt ? (
-        <>
-          <div className="copy-header">
-            <h2>복사용 프롬프트</h2>
-            <button className="secondary-button" onClick={() => copyText(recommendation.copy_prompt || "")} type="button">
-              <Clipboard size={16} />
-              복사
-            </button>
-          </div>
-          <pre className="prompt-output">{recommendation.copy_prompt}</pre>
-        </>
-      ) : null}
+      <div className="why-improved">
+        <SectionHeader label="왜 달라졌나" title="로그에서 반영한 개선점" />
+        <ul>
+          {(fixes.length ? fixes : issues.map((issue) => issue.recommendation)).slice(0, 6).map((item) => (
+            <li key={item}>{safeText(item)}</li>
+          ))}
+          {!fixes.length && !issues.length ? <li>추천을 생성하면 실제 진단 이슈 기반 개선점이 표시됩니다.</li> : null}
+        </ul>
+      </div>
+      <div className="variant-grid">
+        {variants.map((variant) => (
+          <article className="variant-card" key={variant.title}>
+            <div>
+              <strong>{variant.title}</strong>
+              <span>{variant.note}</span>
+            </div>
+            <pre>{safeText(variant.text, "아직 생성된 추천이 없습니다.")}</pre>
+          </article>
+        ))}
+      </div>
+      <div className="copy-header">
+        <SectionHeader label="복사용" title="다음 실행에 넣을 프롬프트 묶음" />
+        <button className="secondary-button" disabled={!copyPrompt} onClick={() => copyText(copyPrompt)} type="button">
+          <Clipboard size={16} />
+          복사
+        </button>
+      </div>
+      <pre className="prompt-output">{safeText(copyPrompt, "추천 생성 후 복사용 system/user/tool/checklist가 표시됩니다.")}</pre>
     </Panel>
   );
 }
 
 function CapturePanel({
+  mode,
   transcript,
   mission,
   setTranscript,
   setMission,
   onImport,
+  onImportLatest,
+  onRefreshThreads,
+  onStartLive,
+  onStopLive,
   disabled,
   lastImport,
+  liveStatus,
+  codexThreads,
+  selectedThreadId,
+  setSelectedThreadId,
+  codexScope,
+  setCodexScope,
 }: {
+  mode: ImportMode;
   transcript: string;
   mission: string;
   setTranscript: (value: string) => void;
   setMission: (value: string) => void;
   onImport: () => void;
+  onImportLatest: () => void;
+  onRefreshThreads: () => void;
+  onStartLive: () => void;
+  onStopLive: () => void;
   disabled: boolean;
   lastImport: string | null;
+  liveStatus: LiveWatcherStatus | null;
+  codexThreads: CodexThreadSummary[];
+  selectedThreadId: string;
+  setSelectedThreadId: (value: string) => void;
+  codexScope: "workspace" | "all";
+  setCodexScope: (value: "workspace" | "all") => void;
 }) {
+  const selectedThread = codexThreads.find((thread) => thread.id === selectedThreadId) ?? codexThreads[0] ?? null;
+
   return (
     <Panel>
-      <SectionHeader label="Codex Capture Adapter" title="실제 실행 로그를 run으로 바꿉니다" />
-      <p className="panel-copy">
-        Codex 출력, 터미널 로그, 대화 로그를 붙여넣으면 mission, prompt, model_response, tool_call, tool_result, error, retry,
-        validation, metric, outcome 이벤트로 변환합니다.
-      </p>
+      <SectionHeader label="로그 가져오기" title={mode === "codex" ? "Codex 로컬 대화를 run으로 변환합니다" : "대화 로그를 붙여넣어 run으로 변환합니다"} />
       <div className="middle-grid">
-        <div className="field">
-          <span>이번 run의 목표</span>
-          <input value={mission} onChange={(event) => setMission(event.target.value)} />
-          <span>Codex 로그</span>
-          <textarea value={transcript} onChange={(event) => setTranscript(event.target.value)} />
-          <button className="primary-button" disabled={disabled || !transcript.trim()} onClick={onImport} type="button">
-            <Upload size={17} />
-            로그에서 run 만들기
-          </button>
+        <div>
+          <label className="field">
+            <span>이 run의 목표</span>
+            <input value={mission} onChange={(event) => setMission(event.target.value)} />
+          </label>
+          {mode === "codex" ? (
+            <>
+              <div className="thread-picker">
+                <div className="thread-picker-head">
+                  <strong>Codex 대화 선택</strong>
+                  <button className="secondary-button compact" disabled={disabled} onClick={onRefreshThreads} type="button">
+                    새로고침
+                  </button>
+                </div>
+                <div className="scope-toggle">
+                  <button className={codexScope === "workspace" ? "active" : ""} onClick={() => setCodexScope("workspace")} type="button">
+                    현재 폴더
+                  </button>
+                  <button className={codexScope === "all" ? "active" : ""} onClick={() => setCodexScope("all")} type="button">
+                    전체 Codex
+                  </button>
+                </div>
+                <select value={selectedThreadId} onChange={(event) => setSelectedThreadId(event.target.value)}>
+                  {codexThreads.length ? (
+                    codexThreads.map((thread) => (
+                      <option key={thread.id} value={thread.id} disabled={!thread.has_rollout}>
+                        {thread.label || thread.title || thread.first_user_message || thread.id}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">가져올 Codex 대화가 없습니다</option>
+                  )}
+                </select>
+                <div className="thread-meta">
+                  <strong>{safeText(selectedThread?.title || selectedThread?.first_user_message, "대화를 선택하면 요약이 표시됩니다.")}</strong>
+                  <small>{selectedThread?.rollout_path ? `rollout: ${selectedThread.rollout_path}` : "rollout JSONL 경로가 없으면 가져올 수 없습니다."}</small>
+                </div>
+              </div>
+              <div className="live-controls">
+                <button className="primary-button" disabled={disabled || !selectedThread?.has_rollout} onClick={onImportLatest} type="button">
+                  <Upload size={17} />
+                  선택한 Codex 대화 가져오기
+                </button>
+                <button className="secondary-button" disabled={disabled || !selectedThread?.has_rollout} onClick={onStartLive} type="button">
+                  <Play size={17} />
+                  실시간 감시 시작
+                </button>
+                <button className="secondary-button" disabled={disabled || !liveStatus?.run_id} onClick={onStopLive} type="button">
+                  <RotateCcw size={17} />
+                  실시간 감시 중지
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <label className="field">
+                <span>Codex 실행 로그</span>
+                <textarea value={transcript} onChange={(event) => setTranscript(event.target.value)} />
+              </label>
+              <button className="primary-button" disabled={disabled || !transcript.trim()} onClick={onImport} type="button">
+                <Upload size={17} />
+                붙여넣은 로그 가져오기
+              </button>
+            </>
+          )}
         </div>
         <div>
+          {liveStatus ? (
+            <div className={liveStatus.process_status === "running" || liveStatus.status === "started" ? "live-status active" : "live-status"}>
+              <strong>{liveStatus.process_status === "running" || liveStatus.status === "started" ? "Codex Desktop 감시 중" : "감시 상태"}</strong>
+              <span>run: {liveStatus.run_id || "-"}</span>
+              <small>{liveStatus.rollout_path || "선택한 Codex rollout JSONL을 따라갑니다."}</small>
+              {liveStatus.last_error ? <small className="danger-text">{liveStatus.last_error}</small> : null}
+            </div>
+          ) : null}
           <div className="notice-box">
             <Info size={17} />
-            <p>지금 구현된 자동화의 핵심은 이 adapter입니다. 완전 자동 감시는 Codex Desktop 내부 hook이 이 adapter에 로그를 흘려보내면 같은 구조로 확장됩니다.</p>
+            <p>Codex 가져오기는 현재 PC의 로컬 .codex/state_5.sqlite와 rollout JSONL을 읽습니다. 외부 PC에 Codex 기록이 없으면 목록이 비어 보일 수 있습니다.</p>
           </div>
           {lastImport ? (
             <div className="compare-result-copy">
@@ -516,9 +758,9 @@ function CapturePanel({
             </div>
           ) : null}
           <div className="capture-status">
-            <h3>인식하는 흔한 패턴</h3>
+            <h3>인식하는 패턴</h3>
             <ul>
-              <li>User/System/Assistant 라벨이 붙은 대화 블록</li>
+              <li>User, System, Assistant 형식의 대화 블록</li>
               <li>functions.shell_command, web.run, apply_patch 같은 tool call</li>
               <li>Exit code, Output, stdout, stderr 기반 tool result/error</li>
               <li>retry, validation, final, success, blocked 같은 상태 문장</li>
@@ -549,13 +791,19 @@ function ComparePanel({
   disabled: boolean;
   onCompare: () => void;
 }) {
+  const better = result ? result.metrics.filter((row) => {
+    if (row.metric === "success") return row.after === true && row.before !== true;
+    if (typeof row.before === "number" && typeof row.after === "number") return row.after < row.before;
+    return false;
+  }).length : 0;
+
   return (
     <Panel>
       <SectionHeader
         label="Before / After"
         title="두 실행의 실제 지표를 비교합니다"
         action={
-          <button className="primary-button" disabled={disabled || !beforeRunId || !afterRunId} onClick={onCompare} type="button">
+          <button className="primary-button" disabled={disabled || !beforeRunId || !afterRunId || beforeRunId === afterRunId} onClick={onCompare} type="button">
             <GitCompare size={17} />
             비교 실행
           </button>
@@ -602,7 +850,7 @@ function ComparePanel({
             ))}
           </div>
           <div className="compare-result-copy">
-            추천 프롬프트가 나아졌는지는 After의 오류, 사용자 개입, 시간, 비용이 줄고 성공 여부와 검증 이벤트가 개선됐는지로 판단합니다.
+            After run에서 개선된 지표가 {better}개입니다. 성공 여부가 바뀌었는지, 오류/사용자 개입/시간/비용이 줄었는지, 검증 이벤트가 충분한지를 함께 판단하세요.
           </div>
         </>
       ) : (
@@ -612,21 +860,82 @@ function ComparePanel({
   );
 }
 
+function NotesPanel({ mode }: { mode: NotesMode }) {
+  return mode === "how" ? (
+    <div className="info-grid">
+      <Panel>
+        <SectionHeader label="동작 방식" title="제품이 run을 만드는 흐름" />
+        <div className="step-list">
+          {productFlow.map((step, index) => (
+            <div key={step}>
+              <span>{index + 1}</span>
+              <p>{step}</p>
+            </div>
+          ))}
+        </div>
+      </Panel>
+      <Panel>
+        <SectionHeader label="외부 exe 배포" title="패키지와 Codex 로그 위치" />
+        <div className="step-list">
+          {packagedAppFlow.map((step, index) => (
+            <div key={step}>
+              <span>{index + 1}</span>
+              <p>{step}</p>
+            </div>
+          ))}
+        </div>
+        <SectionHeader label="현재 제한" title="지금 가능한 것과 아직 조심할 것" />
+        <div className="warning-box">
+          <AlertCircle size={17} />
+          <p>토큰과 비용은 Codex 로그가 값을 제공하는 경우에만 정확합니다. 다른 Codex 데이터 경로를 쓰는 PC는 CODEX_HOME이나 앱 설정으로 경로 지정 옵션을 추가해야 더 안정적입니다.</p>
+        </div>
+        <div className="capture-status">
+          <h3>지금 가능한 것</h3>
+          <ul>
+            <li>Codex Desktop rollout import</li>
+            <li>Codex Desktop live watcher</li>
+            <li>붙여넣은 로그 import와 동일한 분석/추천 파이프라인 적용</li>
+            <li>run 간 Before/After 비교</li>
+          </ul>
+        </div>
+      </Panel>
+    </div>
+  ) : (
+    <Panel>
+      <SectionHeader label="패치노트" title="지금까지 바꾼 것" />
+      <div className="patch-list">
+        {patchNotes.map((note) => (
+          <article key={note.title}>
+            <strong>{note.title}</strong>
+            <p>{note.body}</p>
+          </article>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
 function App() {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [detail, setDetail] = useState<RunDetail | null>(null);
-  const [activeTab, setActiveTab] = useState<TabId>("capture");
+  const [activeTab, setActiveTab] = useState<TabId>("records");
+  const [importMode, setImportMode] = useState<ImportMode>("codex");
+  const [notesMode, setNotesMode] = useState<NotesMode>("how");
   const [workRequest, setWorkRequest] = useState("Tool-Use Flight Recorder + Prompt Recommender를 실제 로그 기반 제품으로 완성");
-  const [captureMission, setCaptureMission] = useState("Codex 작업 기록을 가져와 프롬프트를 개선");
+  const [captureMission, setCaptureMission] = useState("Codex 작업 기록을 가져와 다음 프롬프트를 개선");
   const [transcript, setTranscript] = useState(
-    "User: Tool-Use Flight Recorder + Prompt Recommender UI와 자율 실행 루프를 검증해줘\n\nAssistant: 먼저 관련 파일을 읽고 현재 구조를 확인하겠습니다.\n\nTool: functions.shell_command\nCommand: rg --files\n\nExit code: 0\nOutput: src/App.tsx runner/supervisor.py skills/agent-flight-recorder/scripts/trace_tools.py\n\nTool: functions.shell_command\nCommand: node node_modules/typescript/bin/tsc -b\n\nExit code: 1\nOutput: TypeScript error in src/App.tsx\n\nRetry: 깨진 문구를 제거하고 타입 오류를 수정한 뒤 다시 검증합니다.\n\nValidation: tsc -b passed\n\nFinal: 완료. UI, trace engine, adapter를 수정했고 검증을 통과했습니다.\nDuration: 94s\nTokens: 18200\nCost: $0.46\nSuccess: true",
+    "User: Tool-Use Flight Recorder + Prompt Recommender UI와 자율 실행 루프를 검증해줘\n\nAssistant: 먼저 관련 파일을 읽고 현재 구조를 확인하겠습니다.\n\nTool: functions.shell_command\nCommand: rg --files\n\nExit code: 0\nOutput: src/App.tsx runner/supervisor.py skills/agent-flight-recorder/scripts/trace_tools.py\n\nTool: functions.shell_command\nCommand: node node_modules/typescript/bin/tsc -b\n\nExit code: 1\nOutput: TypeScript error in src/App.tsx\n\nRetry: 깨진 문구와 타입 오류를 수정한 뒤 다시 검증합니다.\n\nValidation: tsc -b passed\n\nFinal: 완료. UI, trace engine, adapter를 수정했고 검증을 통과했습니다.\nDuration: 94s\nTokens: 18200\nCost: $0.46\nSuccess: true",
   );
   const [lastImport, setLastImport] = useState<string | null>(null);
   const [beforeRunId, setBeforeRunId] = useState("");
   const [afterRunId, setAfterRunId] = useState("");
   const [comparison, setComparison] = useState<ComparisonResult | null>(null);
   const [busy, setBusy] = useState(false);
+  const [liveStatus, setLiveStatus] = useState<LiveWatcherStatus | null>(null);
+  const [codexThreads, setCodexThreads] = useState<CodexThreadSummary[]>([]);
+  const [selectedCodexThreadId, setSelectedCodexThreadId] = useState("");
+  const [codexScope, setCodexScope] = useState<"workspace" | "all">("workspace");
 
   const analysis = detail?.analysis ?? null;
   const recommendation = detail?.recommendation ?? null;
@@ -638,9 +947,22 @@ function App() {
     if (!selectedRunId && nextRuns[0]) setSelectedRunId(nextRuns[0].run_id);
   };
 
+  const refreshCodexThreads = async () => {
+    const threads = await listCodexThreads(codexScope);
+    setCodexThreads(threads);
+    if (!threads.some((thread) => thread.id === selectedCodexThreadId)) {
+      setSelectedCodexThreadId(threads.find((thread) => thread.has_rollout)?.id ?? "");
+    }
+  };
+
   useEffect(() => {
     void refreshRuns();
+    void refreshCodexThreads();
   }, []);
+
+  useEffect(() => {
+    void refreshCodexThreads();
+  }, [codexScope]);
 
   useEffect(() => {
     if (!selectedRunId) {
@@ -649,6 +971,17 @@ function App() {
     }
     void getRun(selectedRunId).then(setDetail);
   }, [selectedRunId]);
+
+  useEffect(() => {
+    const timer = window.setInterval(async () => {
+      if (!liveStatus?.run_id) return;
+      const status = await getLiveWatcherStatus(liveStatus.run_id);
+      setLiveStatus(status);
+      await refreshRuns();
+      if (selectedRunId === liveStatus.run_id) setDetail(await getRun(liveStatus.run_id));
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [liveStatus?.run_id, selectedRunId]);
 
   const stats = useMemo(
     () => [
@@ -677,6 +1010,64 @@ function App() {
       setLastImport(`${result.run_id} · ${result.events_imported}개 이벤트`);
       await reloadSelected(result.run_id);
       setActiveTab("records");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleImportLatestCodexThread = async () => {
+    setBusy(true);
+    try {
+      const selectedThread = codexThreads.find((thread) => thread.id === selectedCodexThreadId);
+      const threadMission = selectedThread?.title || selectedThread?.first_user_message || captureMission;
+      const result = await importLatestCodexThread(threadMission, selectedCodexThreadId || undefined);
+      setLastImport(`${result.run_id} · ${result.events_imported}개 이벤트 · Codex thread`);
+      await reloadSelected(result.run_id);
+      setActiveTab("records");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleStartLiveWatcher = async () => {
+    setBusy(true);
+    try {
+      const threadId = selectedCodexThreadId || codexThreads[0]?.id;
+      const status = await startLiveWatcher(captureMission, threadId);
+      setLiveStatus(status);
+      if (status.run_id) await reloadSelected(status.run_id);
+      else await refreshRuns();
+      setActiveTab("records");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleStopLiveWatcher = async () => {
+    setBusy(true);
+    try {
+      const status = await stopLiveWatcher();
+      setLiveStatus(status);
+      if (status.run_id) await reloadSelected(status.run_id);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDeleteRun = async (runId: string) => {
+    const target = runs.find((run) => run.run_id === runId);
+    const title = safeText(target?.mission, runId);
+    if (!window.confirm(`이 run을 삭제할까요?\n\n${title}`)) return;
+    setBusy(true);
+    try {
+      await deleteRun(runId);
+      const nextRuns = await listRuns();
+      setRuns(nextRuns);
+      if (selectedRunId === runId) {
+        const next = nextRuns[0] ?? null;
+        setSelectedRunId(next?.run_id ?? null);
+        setDetail(next ? await getRun(next.run_id) : null);
+      }
     } finally {
       setBusy(false);
     }
@@ -737,15 +1128,23 @@ function App() {
 
   return (
     <div className="app-shell">
-      <RunSidebar runs={runs} selectedRunId={selectedRunId} onSelect={setSelectedRunId} onRefresh={() => void refreshRuns()} />
-      <main className="workspace">
+      <RunSidebar
+        runs={runs}
+        selectedRunId={selectedRunId}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        onSelect={setSelectedRunId}
+        onDelete={handleDeleteRun}
+        onRefresh={() => void refreshRuns()}
+      />
+      <main className={["import", "notes"].includes(activeTab) ? "workspace info-only" : "workspace"}>
         <section className="hero-panel">
           <div>
             <div className="breadcrumb">
               Tool-Use Flight Recorder <ArrowRight size={14} /> Prompt Recommender
             </div>
-            <h1>에이전트가 뭘 했는지 남기고, 다음 프롬프트를 더 좋게 바꿉니다.</h1>
-            <p>목표, 프롬프트, 모델 응답, 도구 호출, 오류, 재시도, 검증, 비용, 성공 여부를 한 실행 단위로 모아 봅니다.</p>
+            <h1>에이전트 실행을 기록하고 다음 프롬프트를 개선합니다</h1>
+            <p>실제 로그를 run 단위로 모아 타임라인, 진단, 추천 프롬프트, Before/After 비교로 보여줍니다.</p>
           </div>
           <StatusBadge busy={busy} />
         </section>
@@ -773,16 +1172,38 @@ function App() {
 
         <TabBar activeTab={activeTab} onChange={setActiveTab} />
 
-        {activeTab === "capture" ? (
-          <CapturePanel
-            transcript={transcript}
-            mission={captureMission}
-            setTranscript={setTranscript}
-            setMission={setCaptureMission}
-            onImport={handleImport}
-            disabled={busy}
-            lastImport={lastImport}
-          />
+        {activeTab === "import" ? (
+          <>
+            <SegmentedSwitch
+              value={importMode}
+              onChange={setImportMode}
+              label="로그 가져오기 방식"
+              options={[
+                { value: "codex", label: "Codex 대화" },
+                { value: "paste", label: "로그 붙여넣기" },
+              ]}
+            />
+            <CapturePanel
+              mode={importMode}
+              transcript={transcript}
+              mission={captureMission}
+              setTranscript={setTranscript}
+              setMission={setCaptureMission}
+              onImport={handleImport}
+              onImportLatest={handleImportLatestCodexThread}
+              onRefreshThreads={() => void refreshCodexThreads()}
+              onStartLive={handleStartLiveWatcher}
+              onStopLive={handleStopLiveWatcher}
+              disabled={busy}
+              lastImport={lastImport}
+              liveStatus={liveStatus}
+              codexThreads={codexThreads}
+              selectedThreadId={selectedCodexThreadId}
+              setSelectedThreadId={setSelectedCodexThreadId}
+              codexScope={codexScope}
+              setCodexScope={setCodexScope}
+            />
+          </>
         ) : null}
 
         {activeTab === "records" ? (
@@ -794,7 +1215,7 @@ function App() {
             </div>
             <div className="top-grid">
               <Panel>
-                <SectionHeader label="실행 기록" title="이 run에 저장되는 항목" />
+                <SectionHeader label="실행 기록" title="이 run에 저장된 항목" />
                 <div className="record-list">
                   {recordItems.map((item) => (
                     <div key={item}>
@@ -805,10 +1226,11 @@ function App() {
                 </div>
               </Panel>
               <Panel className="timeline-panel">
-                <SectionHeader label="타임라인 뷰" title="시간순으로 실행을 재생합니다" />
+                <SectionHeader label="타임라인" title="시간순으로 실행을 재생합니다" />
                 <Timeline detail={detail} />
               </Panel>
             </div>
+            <PromptSourcePanel detail={detail} />
             <DiagnosisPanel analysis={analysis} recommendation={recommendation} />
           </>
         ) : null}
@@ -838,52 +1260,19 @@ function App() {
           />
         ) : null}
 
-        {activeTab === "how" ? (
-          <div className="info-grid">
-            <Panel>
-              <SectionHeader label="동작 방식" title="제품이 run을 만드는 흐름" />
-              <div className="step-list">
-                {autopilotSteps.map((step, index) => (
-                  <div key={step}>
-                    <span>{index + 1}</span>
-                    <p>{step}</p>
-                  </div>
-                ))}
-              </div>
-            </Panel>
-            <Panel>
-              <SectionHeader label="자동 감시 상태" title="지금 가능한 것과 다음 연결점" />
-              <div className="warning-box">
-                <AlertCircle size={17} />
-                <p>
-                  현재 제품은 실제 Codex 로그를 가져와 run으로 만드는 adapter를 갖췄습니다. Codex Desktop의 모든 내부 실행을 무접촉으로 감시하려면
-                  Desktop/CLI 쪽 hook이 이 adapter에 transcript를 넘겨야 합니다.
-                </p>
-              </div>
-              <div className="capture-status">
-                <h3>다음 자동화 연결</h3>
-                <ul>
-                  <li>Codex CLI stdout/stderr wrapper가 codex_capture.py를 호출</li>
-                  <li>MCP tool로 import_transcript 노출</li>
-                  <li>hook에서 pre/post tool event를 같은 run_id로 append</li>
-                </ul>
-              </div>
-            </Panel>
-          </div>
-        ) : null}
-
-        {activeTab === "patch" ? (
-          <Panel>
-            <SectionHeader label="패치노트" title="지금까지 바뀐 것" />
-            <div className="patch-list">
-              {patchNotes.map((note) => (
-                <article key={note.title}>
-                  <strong>{note.title}</strong>
-                  <p>{note.body}</p>
-                </article>
-              ))}
-            </div>
-          </Panel>
+        {activeTab === "notes" ? (
+          <>
+            <SegmentedSwitch
+              value={notesMode}
+              onChange={setNotesMode}
+              label="작업 노트"
+              options={[
+                { value: "how", label: "동작 방식" },
+                { value: "patch", label: "패치노트" },
+              ]}
+            />
+            <NotesPanel mode={notesMode} />
+          </>
         ) : null}
       </main>
     </div>

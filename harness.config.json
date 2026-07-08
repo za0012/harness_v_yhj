@@ -13,6 +13,9 @@
     "desktop_thread_demo": "runner/plans/desktop-thread-demo.json"
   },
   "hooks": {
+    "codex_hooks_config": ".codex/hooks.json",
+    "session_start": "hooks/session-start.cmd",
+    "user_prompt_submit": "hooks/user-prompt-submit.cmd",
     "pre_tool_use": "hooks/pre-tool-use.cmd",
     "post_tool_use": "hooks/post-tool-use.cmd",
     "session_outcome": "hooks/session-outcome.cmd"

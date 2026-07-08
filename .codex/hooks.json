@@ -1,0 +1,72 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/yhj/Documents/\uD558\uB124\uC2A4/hooks/session-start.cmd",
+            "commandWindows": "C:/Users/yhj/Documents/\uD558\uB124\uC2A4/hooks/session-start.cmd",
+            "timeout": 30,
+            "statusMessage": "Flight Recorder: session start"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/yhj/Documents/\uD558\uB124\uC2A4/hooks/user-prompt-submit.cmd",
+            "commandWindows": "C:/Users/yhj/Documents/\uD558\uB124\uC2A4/hooks/user-prompt-submit.cmd",
+            "timeout": 30,
+            "statusMessage": "Flight Recorder: recording prompt"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/yhj/Documents/\uD558\uB124\uC2A4/hooks/pre-tool-use.cmd",
+            "commandWindows": "C:/Users/yhj/Documents/\uD558\uB124\uC2A4/hooks/pre-tool-use.cmd",
+            "timeout": 30,
+            "statusMessage": "Flight Recorder: recording tool call"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/yhj/Documents/\uD558\uB124\uC2A4/hooks/post-tool-use.cmd",
+            "commandWindows": "C:/Users/yhj/Documents/\uD558\uB124\uC2A4/hooks/post-tool-use.cmd",
+            "timeout": 30,
+            "statusMessage": "Flight Recorder: recording tool result"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/yhj/Documents/\uD558\uB124\uC2A4/hooks/session-outcome.cmd",
+            "commandWindows": "C:/Users/yhj/Documents/\uD558\uB124\uC2A4/hooks/session-outcome.cmd",
+            "timeout": 30,
+            "statusMessage": "Flight Recorder: recording outcome"
+          }
+        ]
+      }
+    ]
+  }
+}

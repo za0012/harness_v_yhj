@@ -65,6 +65,10 @@ export type Recommendation = {
   evidence?: string[];
   diagnosis: string[];
   diagnosis_issues?: DiagnosisIssue[];
+  original_user_prompt?: string;
+  original_system_prompt?: string;
+  prompt_fixes?: string[];
+  used_tools?: string[];
   system_prompt?: string;
   user_prompt?: string;
   tool_policy?: string[];
@@ -102,6 +106,34 @@ export type ImportResult = {
   events_imported: number;
   analysis: Analysis;
   recommendation: Recommendation;
+};
+
+export type CodexThreadSummary = {
+  id: string;
+  label?: string;
+  title?: string;
+  first_user_message?: string;
+  cwd?: string;
+  rollout_path?: string;
+  tokens_used?: number;
+  created_at_ms?: number;
+  updated_at_ms?: number;
+  updated_label?: string;
+  short_id?: string;
+  has_rollout?: boolean;
+};
+
+export type LiveWatcherStatus = {
+  status: "starting" | "started" | "watching" | "running" | "recovering" | "stopped" | "unknown" | string;
+  process_status?: "running" | "stopped" | string;
+  run_id?: string | null;
+  thread_id?: string | null;
+  rollout_path?: string;
+  offset?: number;
+  events_imported?: number;
+  last_seen_at?: string;
+  last_error?: string;
+  analysis_event_count?: number;
 };
 
 export type SupervisorStatus =

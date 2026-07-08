@@ -2,6 +2,10 @@
 node_modules/
 .pnpm-store/
 dist/
+build/
+output/
+artifacts/
+release*/
 *.tsbuildinfo
 __pycache__/
 *.pyc

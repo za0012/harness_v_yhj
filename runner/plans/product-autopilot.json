@@ -15,7 +15,7 @@
       "kind": "validation",
       "summary": "Compile Python harness and adapter files.",
       "shell": "cmd",
-      "command": "C:\\Users\\yhj\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe -m py_compile skills\\agent-flight-recorder\\scripts\\trace_tools.py mcp\\flight-recorder\\server.py hooks\\hook_event.py runner\\supervisor.py runner\\adapters\\codex_adapter.py runner\\adapters\\desktop_thread_bridge.py runner\\adapters\\codex_capture.py runner\\tests\\acceptance.py",
+      "command": "C:\\Users\\yhj\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe -m py_compile skills\\agent-flight-recorder\\scripts\\trace_tools.py mcp\\flight-recorder\\server.py hooks\\hook_event.py runner\\supervisor.py runner\\adapters\\codex_adapter.py runner\\adapters\\desktop_thread_bridge.py runner\\adapters\\codex_capture.py runner\\adapters\\codex_exec_capture.py runner\\adapters\\codex_rollout_capture.py runner\\adapters\\codex_live_watcher.py runner\\tests\\acceptance.py",
       "required": true
     },
     {
@@ -48,6 +48,14 @@
       "summary": "Run TypeScript build through the bundled Node runtime.",
       "shell": "cmd",
       "command": "C:\\Users\\yhj\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe node_modules\\typescript\\bin\\tsc -b",
+      "required": true
+    },
+    {
+      "id": "static-ui-smoke",
+      "kind": "validation",
+      "summary": "Check Korean UI copy and built assets for broken text.",
+      "shell": "cmd",
+      "command": "C:\\Users\\yhj\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe runner\\tests\\static-ui-smoke.mjs",
       "required": true
     }
   ]

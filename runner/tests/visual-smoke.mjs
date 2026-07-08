@@ -50,26 +50,26 @@ function serveDist() {
 }
 
 async function visible(page, text) {
-  return page.getByText(text).isVisible();
+  return page.getByText(text).first().isVisible();
 }
 
 const server = await serveDist();
 const port = server.address().port;
 await fs.mkdir(outputDir, { recursive: true });
 
-let browser;
 let context;
+let browser;
 try {
   const launchErrors = [];
   for (const executablePath of browserPaths) {
     try {
       await fs.access(executablePath);
-      const profileDir = path.join(outputDir, `profile-${path.basename(executablePath, ".exe")}`);
-      context = await chromium.launchPersistentContext(profileDir, {
+      browser = await chromium.launch({
         headless: true,
         executablePath,
-        args: ["--disable-gpu", "--single-process", "--no-sandbox"],
+        args: ["--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"],
       });
+      context = await browser.newContext();
       break;
     } catch (error) {
       if (error?.code !== "ENOENT") launchErrors.push({ executablePath, message: String(error.message || error) });
@@ -79,22 +79,25 @@ try {
   const page = context.pages()[0] || (await context.newPage());
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`http://127.0.0.1:${port}`, { waitUntil: "networkidle" });
+
   const checks = [];
-  checks.push(["hero", await visible(page, "에이전트가 뭘 했는지 남기고")]);
-  checks.push(["capture", await page.getByRole("button", { name: "로그에서 run 만들기" }).isVisible()]);
-  await page.getByRole("button", { name: "실행 기록" }).click();
+  checks.push(["hero", await visible(page, "작성한 프롬프트")]);
   checks.push(["records", await visible(page, "시간순으로 실행을 재생합니다")]);
+  await page.getByRole("button", { name: "가져오기" }).click();
+  checks.push(["codex-import", await visible(page, "Codex 대화를 골라 run으로 가져옵니다")]);
+  await page.getByRole("button", { name: "로그 붙여넣기" }).click();
+  checks.push(["capture", await page.getByRole("button", { name: "로그에서 run 만들기" }).isVisible()]);
   await page.getByRole("button", { name: "프롬프트 추천" }).click();
   checks.push(["recommend", await visible(page, "선택한 run의 실제 약점을 넣어")]);
   await page.getByRole("button", { name: "Before / After" }).click();
   checks.push(["compare", await visible(page, "두 실행의 실제 지표를 비교합니다")]);
-  await page.getByRole("button", { name: "동작 방식" }).click();
+  await page.getByRole("button", { name: "작업 노트" }).click();
   checks.push(["how", await visible(page, "제품이 run을 만드는 흐름")]);
   await page.getByRole("button", { name: "패치노트" }).click();
-  checks.push(["patch", await visible(page, "Codex 로그 가져오기 추가")]);
+  checks.push(["patch", await visible(page, "탭 구조와 긴 대화 읽기 개선")]);
 
   const body = await page.locator("body").innerText();
-  const broken = /[�]|占|揶|疫|筌|獄|野/.test(body);
+  const broken = /[\uFFFD\u5360]{2,}|[?]{4,}|\u5A9B|\u6E72|\u7570|\u5BC3|\uF9CF/.test(body);
   await page.screenshot({ path: path.join(outputDir, "visual-smoke.png"), fullPage: false });
   const failed = checks.filter(([, ok]) => !ok);
   if (failed.length || broken) {

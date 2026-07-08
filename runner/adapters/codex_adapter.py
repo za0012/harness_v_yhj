@@ -20,6 +20,7 @@ import sys
 sys.path.insert(0, str(TRACE_TOOLS))
 
 from trace_tools import record_prompt  # noqa: E402
+from codex_exec_capture import run_codex_exec  # noqa: E402
 
 
 def now_iso() -> str:
@@ -123,6 +124,31 @@ def run_desktop_thread_mode(run_id: str, step_id: str, mission: str, prompt_file
     )
 
 
+def run_codex_exec_mode(
+    run_id: str,
+    step_id: str,
+    mission: str,
+    output_file: Path,
+    prompt: str,
+    command: str | None,
+    timeout_seconds: int,
+) -> None:
+    result = run_codex_exec(
+        prompt=prompt,
+        mission=mission,
+        run_id=run_id,
+        codex_exe=command,
+        cwd=str(ROOT),
+        sandbox="workspace-write",
+        approval="never",
+        timeout_seconds=timeout_seconds,
+    )
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    output_file.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    result.update({"step_id": step_id, "mode": "codex-exec", "output_file": str(output_file)})
+    emit(result, 0 if result.get("status") == "passed" else 1)
+
+
 def render_command(template: str, prompt_file: Path, output_file: Path, prompt: str) -> str:
     return (
         template.replace("{prompt_file}", str(prompt_file))
@@ -194,7 +220,7 @@ def main() -> None:
     parser.add_argument("--mission", required=True)
     parser.add_argument("--prompt-file", required=True)
     parser.add_argument("--output-file", required=True)
-    parser.add_argument("--mode", choices=["auto", "command", "mock", "desktop-thread"], default="auto")
+    parser.add_argument("--mode", choices=["auto", "command", "mock", "desktop-thread", "codex-exec"], default="auto")
     parser.add_argument("--command")
     parser.add_argument("--timeout-seconds", type=int, default=600)
     args = parser.parse_args()
@@ -219,6 +245,9 @@ def main() -> None:
 
     if args.mode == "desktop-thread":
         run_desktop_thread_mode(args.run_id, args.step_id, args.mission, prompt_file, output_file, prompt)
+
+    if args.mode == "codex-exec":
+        run_codex_exec_mode(args.run_id, args.step_id, args.mission, output_file, prompt, args.command, args.timeout_seconds)
 
     command, blocker = detect_command(args.command)
     if blocker:

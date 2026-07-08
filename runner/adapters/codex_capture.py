@@ -32,9 +32,9 @@ RESULT_PATTERNS = [
     re.compile(r"wall time\s*[:=]\s*(.+)", re.I),
     re.compile(r"output\s*[:=]\s*(.*)", re.I),
 ]
-USER_MARKERS = re.compile(r"^\s*(?:user|사용자|human)\s*[:：]\s*(.*)", re.I)
-ASSISTANT_MARKERS = re.compile(r"^\s*(?:assistant|model|codex|응답)\s*[:：]\s*(.*)", re.I)
-SYSTEM_MARKERS = re.compile(r"^\s*(?:system|developer|시스템|개발자)\s*[:：]\s*(.*)", re.I)
+USER_MARKERS = re.compile(r"^\s*(?:user|사용자|human)\s*[:>]\s*(.*)", re.I)
+ASSISTANT_MARKERS = re.compile(r"^\s*(?:assistant|model|codex|응답)\s*[:>]\s*(.*)", re.I)
+SYSTEM_MARKERS = re.compile(r"^\s*(?:system|developer|시스템|개발자)\s*[:>]\s*(.*)", re.I)
 
 
 def compact(value: str, limit: int = 220) -> str:
@@ -110,6 +110,14 @@ def parse_metrics(text: str) -> dict[str, Any]:
         "user_intervention_count": interventions,
         "success": success,
     }
+
+
+def mission_from_first_user(text: str) -> str:
+    for line in text.splitlines():
+        match = USER_MARKERS.match(line)
+        if match and match.group(1).strip():
+            return match.group(1).strip()
+    return "Imported Codex execution log"
 
 
 def import_transcript(
@@ -202,7 +210,7 @@ def import_transcript(
             imported += 1
             continue
 
-        if any(word in lower for word in ("i will", "판단", "decide", "plan", "계획", "여기서")):
+        if any(word in lower for word in ("i will", "판단", "decide", "plan", "계획")):
             append_event(run_id, "decision", compact(block), {"raw": block, "source": source})
             imported += 1
             continue
@@ -229,14 +237,6 @@ def import_transcript(
     analysis = analyze(run_id)
     recommendation = recommend(run_id, mission or mission_from_first_user(text))
     return {"run_id": run_id, "events_imported": imported, "analysis": analysis, "recommendation": recommendation}
-
-
-def mission_from_first_user(text: str) -> str:
-    for line in text.splitlines():
-        match = USER_MARKERS.match(line)
-        if match and match.group(1).strip():
-            return match.group(1).strip()
-    return "Imported Codex execution log"
 
 
 def main() -> None:

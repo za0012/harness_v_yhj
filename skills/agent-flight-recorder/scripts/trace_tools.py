@@ -125,14 +125,7 @@ def record_metric(
 
 def normalize_task(task: str) -> str:
     cleaned = task.strip()
-    prefixes = [
-        "이런 작업을 하고 싶어:",
-        "이런 작업 하고 싶어:",
-        "작업 목표:",
-        "목표:",
-        "Mission:",
-        "mission:",
-    ]
+    prefixes = ["작업 목표:", "목표:", "Mission:", "mission:"]
     changed = True
     while changed:
         changed = False
@@ -198,7 +191,7 @@ def diagnose_events(events: list[dict[str, Any]]) -> list[dict[str, str]]:
                 "high",
                 "실행 기록이 비어 있음",
                 "events.jsonl에 분석할 이벤트가 없습니다.",
-                "작업 시작 시 mission, prompt, tool call, validation, outcome을 남기세요.",
+                "작업 시작 때 mission, prompt, tool call, validation, outcome을 남기세요.",
             )
         ]
 
@@ -224,7 +217,7 @@ def diagnose_events(events: list[dict[str, Any]]) -> list[dict[str, str]]:
             )
         )
 
-    if not has_any(prompt_text, ("do not", "don't", "must not", "금지", "하지 말", "삭제 금지", "승인 없이")):
+    if not has_any(prompt_text, ("do not", "don't", "must not", "금지", "하지 말", "승인 없이")):
         issues.append(
             diagnosis_issue(
                 "missing_forbidden_actions",
@@ -242,7 +235,7 @@ def diagnose_events(events: list[dict[str, Any]]) -> list[dict[str, str]]:
                 "medium",
                 "출력 형식이 불명확함",
                 "마지막 답변이나 산출물 형식에 대한 지시가 부족합니다.",
-                "최종 답변에 변경사항, 검증 결과, 남은 위험을 포함하도록 형식을 고정하세요.",
+                "최종 답변은 변경 사항, 검증 결과, 남은 위험을 포함하도록 형식을 고정하세요.",
             )
         )
 
@@ -252,7 +245,7 @@ def diagnose_events(events: list[dict[str, Any]]) -> list[dict[str, str]]:
                 "missing_tool_policy",
                 "medium",
                 "도구 사용 기준이 없음",
-                f"tool_call은 {len(tool_calls)}개 있었지만 프롬프트에 도구 사용 원칙이 없습니다.",
+                f"tool_call은 {len(tool_calls)}개 있었지만 프롬프트에는 도구 사용 원칙이 없습니다.",
                 "파일 읽기, 검색, 명령 실행, 검증을 언제 수행할지 기준을 적으세요.",
             )
         )
@@ -264,7 +257,7 @@ def diagnose_events(events: list[dict[str, Any]]) -> list[dict[str, str]]:
                 "high",
                 "검증 단계가 빠짐",
                 f"tool_call {len(tool_calls)}개가 있지만 validation 이벤트가 없습니다.",
-                "수정 후 최소 하나의 로컬 검증 명령 또는 수동 확인 결과를 기록하세요.",
+                "수정 뒤 최소 하나의 로컬 검증 명령 또는 수동 확인 결과를 기록하세요.",
             )
         )
 
@@ -286,7 +279,7 @@ def diagnose_events(events: list[dict[str, Any]]) -> list[dict[str, str]]:
                 "high",
                 "실패 후 재시도 전략이 없음",
                 f"error {len(errors)}개가 있지만 retry 이벤트가 없습니다.",
-                "실패 원인, 회복 시도, 축소 실행 기준을 retry 이벤트로 남기세요.",
+                "실패 원인, 복구 시도, 축소 실행 기준을 retry 이벤트로 남기세요.",
             )
         )
 
@@ -309,7 +302,7 @@ def diagnose_events(events: list[dict[str, Any]]) -> list[dict[str, str]]:
                 "medium",
                 "역할과 제약이 너무 많이 섞임",
                 "프롬프트가 길고 역할, 규칙, 제약 표현이 많습니다.",
-                "시스템 원칙, 작업 지시, 도구 정책, 검증 조건을 섹션별로 분리하세요.",
+                "시스템 원칙, 작업 지시, 도구 정책, 검증 조건을 섹션별로 나누세요.",
             )
         )
 
@@ -390,24 +383,78 @@ def mission_from_events(events: list[dict[str, Any]], fallback: str) -> str:
     return fallback
 
 
+def issue_ids(issues: list[dict[str, Any]]) -> set[str]:
+    return {str(issue.get("id")) for issue in issues}
+
+
 def evidence_lines(events: list[dict[str, Any]], analysis: dict[str, Any]) -> list[str]:
     counts = analysis.get("event_counts") or {}
     metrics = analysis.get("metric_totals") or {}
     lines = [
-        f"이 run은 이벤트 {analysis.get('event_count', 0)}개, 도구 호출 {counts.get('tool_call', 0)}개, 오류 {counts.get('error', 0)}개, 검증 {counts.get('validation', 0)}개를 남겼습니다.",
+        f"이 run은 이벤트 {analysis.get('event_count', 0)}개, 도구 호출 {counts.get('tool_call', 0)}개, 오류 {counts.get('error', 0)}개, 검증 {counts.get('validation', 0)}개를 포함했습니다.",
     ]
     if metrics.get("duration_ms"):
-        lines.append(f"완료 시간은 약 {round(metrics['duration_ms'] / 1000)}초로 기록됐습니다.")
+        lines.append(f"완료 시간은 약 {round(metrics['duration_ms'] / 1000)}초로 기록되었습니다.")
+    if metrics.get("token_count"):
+        lines.append(f"토큰 사용량은 {metrics['token_count']:,}개로 기록되었습니다.")
+    if metrics.get("cost_estimated"):
+        lines.append(f"비용은 약 ${metrics['cost_estimated']:.4f}로 기록되었습니다.")
     if metrics.get("success") is not None:
-        lines.append(f"최종 성공 여부는 {metrics['success']}로 기록됐습니다.")
+        lines.append(f"최종 성공 여부는 {metrics['success']}로 기록되었습니다.")
     last_error = next((event for event in reversed(events) if event.get("type") == "error"), None)
     if last_error:
         lines.append(f"마지막 오류 근거: {last_error.get('summary')}")
     return lines
 
 
-def issue_ids(issues: list[dict[str, Any]]) -> set[str]:
-    return {str(issue.get("id")) for issue in issues}
+def prompt_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [event for event in events if event.get("type") == "prompt"]
+
+
+def prompt_excerpt(events: list[dict[str, Any]], role: str = "user", limit: int = 420) -> str:
+    for event in reversed(prompt_events(events)):
+        data = event.get("data") or {}
+        if data.get("role") == role and isinstance(data.get("content"), str):
+            content = data["content"].strip()
+            return content[:limit] + ("..." if len(content) > limit else "")
+    return ""
+
+
+def tool_names(events: list[dict[str, Any]]) -> list[str]:
+    names: list[str] = []
+    for event in events:
+        if event.get("type") != "tool_call":
+            continue
+        data = event.get("data") or {}
+        name = data.get("tool_name") or data.get("tool") or data.get("recipient_name") or event.get("summary")
+        if isinstance(name, str) and name:
+            names.append(name)
+    return list(dict.fromkeys(names))
+
+
+def issue_driven_actions(ids: set[str], analysis: dict[str, Any]) -> list[str]:
+    actions: list[str] = []
+    if "missing_goal" in ids:
+        actions.append("작업 목표를 한 문장으로 먼저 고정하고, 목표에 포함되지 않는 일은 별도 요청으로 분리한다.")
+    if "missing_success_criteria" in ids:
+        actions.append("완료 조건을 측정 가능한 체크리스트 3~5개로 둔다.")
+    if "missing_forbidden_actions" in ids:
+        actions.append("삭제, 리셋, 외부 전송, 대규모 리팩터링처럼 하지 말아야 할 행동을 명시한다.")
+    if "missing_output_format" in ids:
+        actions.append("최종 답변 형식을 변경 사항, 검증 결과, 남은 위험으로 고정한다.")
+    if "missing_tool_policy" in ids:
+        actions.append("검색, 파일 읽기, 명령 실행, UI 검증을 언제 사용할지 기준을 둔다.")
+    if "missing_validation" in ids:
+        actions.append("구현 뒤 타입체크, 스모크 테스트, UI 확인 중 가능한 검증을 validation으로 남긴다.")
+    if "missing_model_response" in ids:
+        actions.append("모델 응답 원문 또는 요약을 model_response 이벤트로 저장한다.")
+    if "missing_retry_strategy" in ids or analysis.get("error_count", 0) > 0:
+        actions.append("실패하면 원인을 분류하고 같은 방식 반복 대신 다른 복구 경로를 한 번 시도한다.")
+    if "missing_outcome" in ids:
+        actions.append("마지막에 completed, failed, blocked 중 하나로 outcome을 남긴다.")
+    if "overloaded_prompt" in ids:
+        actions.append("역할, 작업 지시, 도구 정책, 검증 조건을 섹션으로 나눠 프롬프트를 줄인다.")
+    return actions
 
 
 def recommend(run_id: str, task: str) -> dict[str, Any]:
@@ -418,34 +465,42 @@ def recommend(run_id: str, task: str) -> dict[str, Any]:
     ids = issue_ids(issues)
     mission = mission_from_events(events, task)
     evidence = evidence_lines(events, analysis)
-    diagnosis = [issue["title"] for issue in issues] or ["기록 구조가 대체로 안정적입니다. 다음 실행에서는 비용, 완료 시간, 성공 기준을 더 명확히 비교하세요."]
+    diagnosis = [issue["title"] for issue in issues] or ["기록 구조는 안정적입니다. 다음 실행에서는 비용, 완료 시간, 성공 기준을 더 선명하게 비교하세요."]
+    actions = issue_driven_actions(ids, analysis)
+    original_user_prompt = prompt_excerpt(events, "user")
+    original_system_prompt = prompt_excerpt(events, "system")
+    used_tools = tool_names(events)
 
     success_criteria = [
         "사용자가 확인 가능한 산출물을 만든다.",
-        "목표, 시스템/개발자/사용자 프롬프트, 모델 응답, tool call, tool result를 실행 단위로 기록한다.",
-        "오류, 재시도, 중단 지점, 실행 시간, 토큰, 비용, 최종 성공 여부를 누락 없이 남긴다.",
+        "실행 중 받은 프롬프트, 모델 응답, 도구 호출, 도구 결과를 run 단위로 남긴다.",
+        "오류, 재시도, 중단 지점, 실행 시간, 토큰, 비용, 최종 성공 여부를 누락 없이 기록한다.",
         "타임라인, 프롬프트 진단, 추천 프롬프트, Before/After 비교가 같은 run 데이터에서 계산된다.",
     ]
     if "missing_validation" in ids:
-        success_criteria.append("수정 후 최소 하나의 로컬 검증 결과를 validation 이벤트로 기록한다.")
+        success_criteria.append("최소 한 가지 검증 결과를 validation 이벤트로 남긴다.")
     if "missing_outcome" in ids:
-        success_criteria.append("마지막에 completed, failed, blocked 중 하나로 outcome을 기록한다.")
+        success_criteria.append("마지막에 completed, failed, blocked 중 하나로 outcome을 남긴다.")
     if "missing_model_response" in ids:
-        success_criteria.append("모델 응답 원문 또는 핵심 요약을 model_response로 저장한다.")
+        success_criteria.append("모델 응답 원문 또는 요약을 model_response로 저장한다.")
+    if analysis.get("error_count", 0) > 0:
+        success_criteria.append("이전 run에서 발생한 오류 유형이 재발하지 않는지 확인한다.")
 
     system_prompt = (
-        "당신은 Tool-Use Flight Recorder가 감시하는 자율 AI 에이전트입니다. "
-        "사용자 목표를 실제 산출물로 완주하면서, 판단, 도구 호출, 오류, 재시도, 검증, 비용과 결과를 실행 로그로 남깁니다. "
+        "당신은 Tool-Use Flight Recorder가 관찰하는 자율 AI 에이전트입니다. "
+        "사용자 목표를 실제 산출물로 완주하면서 프롬프트, 모델 응답, 판단, 도구 호출, 오류, 재시도, 검증, 비용과 결과를 실행 로그로 남깁니다. "
         "불명확한 부분은 합리적으로 가정하되 권한, 안전, 필수 입력이 막히는 경우에만 사용자에게 질문합니다."
     )
-
+    fixes_text = "\n".join(f"- {item}" for item in actions) if actions else "- 현재 큰 누락은 없지만 완료 기준, 검증, 비용/시간 비교를 더 선명하게 둔다."
     user_prompt = (
         f"작업 목표:\n{task}\n\n"
-        "완료 조건:\n"
+        "이전 run에서 본 근거:\n"
+        + "\n".join(f"- {line}" for line in evidence)
+        + "\n\n이번 프롬프트에서 반드시 보완할 점:\n"
+        + fixes_text
+        + "\n\n완료 조건:\n"
         + "\n".join(f"- {item}" for item in success_criteria)
-        + "\n\n"
-        "이번 run에서 발견된 약점:\n"
-        + "\n".join(f"- {item['title']}: {item['recommendation']}" for item in issues[:6])
+        + "\n\n출력 형식:\n- 변경한 산출물\n- 검증 결과\n- 남은 위험\n- 다음 run에서 비교할 지표"
     )
 
     tool_policy = [
@@ -454,30 +509,36 @@ def recommend(run_id: str, task: str) -> dict[str, Any]:
         "명령이 실패하면 error를 기록하고 원인을 권한, 환경, 입력, 코드 오류 중 하나로 분류한다.",
         "삭제, 리셋, 배포, 외부 전송처럼 되돌리기 어려운 행동은 명시 승인 없이 하지 않는다.",
     ]
+    if used_tools:
+        tool_policy.append(f"이전 run에서 사용한 도구({', '.join(used_tools[:5])})는 같은 목적일 때만 반복 사용한다.")
     if "missing_retry_strategy" in ids or analysis.get("error_count", 0) > 0:
-        tool_policy.append("같은 실패를 반복하지 말고, 한 번은 다른 경로로 복구한 뒤 그래도 막히면 blocked outcome을 남긴다.")
+        tool_policy.append("같은 실패를 반복하지 말고 두 번째 시도에서는 다른 검증 경로나 더 작은 범위로 복구한다.")
     if "missing_validation" in ids:
-        tool_policy.append("구현 후 타입체크, 테스트, 빌드, 스크린샷 중 가장 가까운 검증을 반드시 실행한다.")
+        tool_policy.append("구현 뒤 가능한 검증을 반드시 실행하고 결과를 validation 이벤트로 남긴다.")
 
     validation_checklist = [
-        "events.jsonl에 mission, prompt, model_response, tool_call, tool_result가 들어갔는가?",
-        "오류가 있었다면 error와 retry 또는 blocked outcome이 남았는가?",
-        "validation 이벤트가 실제 명령 결과나 확인 근거를 포함하는가?",
+        "events.jsonl에 mission, prompt, model_response, tool_call, tool_result가 들어가는가?",
+        "오류가 있으면 error와 retry 또는 blocked outcome이 남는가?",
+        "validation 이벤트가 실제 명령 결과나 수동 확인 근거를 포함하는가?",
         "recommendation.json이 이번 run의 diagnosis_issues와 evidence를 반영하는가?",
         "Before/After 비교에서 success, tool_call_count, error_count, cost, duration, user_intervention_count가 계산되는가?",
     ]
-
     retry_strategy = [
         "실패 원인을 권한, 환경, 입력 부족, 코드 오류로 먼저 분류한다.",
         "복구 가능한 오류는 가장 작은 수정으로 한 번 재시도하고 retry 이벤트를 남긴다.",
-        "같은 오류가 반복되면 범위를 줄여 검증 가능한 부분 산출물까지 완주한다.",
+        "같은 오류가 반복되면 범위를 줄여 검증 가능한 최소 산출물까지 완주한다.",
         "권한이나 필수 입력이 없으면 중단 지점과 다음 행동을 outcome에 남긴다.",
     ]
 
     prompt = (
         f"Mission:\n{task}\n\n"
-        "Trace evidence:\n"
+        "Original prompt evidence:\n"
+        + (f"- User prompt excerpt: {original_user_prompt}\n" if original_user_prompt else "- User prompt was not captured in this run.\n")
+        + (f"- System prompt excerpt: {original_system_prompt}\n" if original_system_prompt else "")
+        + "\nTrace evidence:\n"
         + "\n".join(f"- {line}" for line in evidence)
+        + "\n\nPrompt fixes applied:\n"
+        + fixes_text
         + "\n\nSuccess criteria:\n"
         + "\n".join(f"- {item}" for item in success_criteria)
         + "\n\nOperating rules:\n"
@@ -486,7 +547,7 @@ def recommend(run_id: str, task: str) -> dict[str, Any]:
         + "\n".join(f"- {item}" for item in validation_checklist)
         + "\n\nRetry strategy:\n"
         + "\n".join(f"- {item}" for item in retry_strategy)
-        + "\n\nFinal response:\n- 변경된 산출물, 검증 근거, 남은 위험만 짧게 보고한다.\n"
+        + "\n\nFinal response:\n- 변경한 산출물, 검증 결과, 남은 위험만 짧게 보고한다.\n"
     )
 
     result = {
@@ -495,6 +556,10 @@ def recommend(run_id: str, task: str) -> dict[str, Any]:
         "evidence": evidence,
         "diagnosis": diagnosis,
         "diagnosis_issues": issues,
+        "original_user_prompt": original_user_prompt,
+        "original_system_prompt": original_system_prompt,
+        "prompt_fixes": actions,
+        "used_tools": used_tools,
         "system_prompt": system_prompt,
         "user_prompt": user_prompt,
         "tool_policy": tool_policy,

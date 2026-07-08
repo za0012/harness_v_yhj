@@ -9,22 +9,56 @@
     "electron": "electron .",
     "electron:dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron .\"",
     "build": "tsc -b && vite build",
+    "prepare:python": "node scripts/prepare-python-runtime.cjs",
+    "prepare:prepackaged": "pnpm run build && pnpm run prepare:python && node scripts/prepare-prepackaged-app.cjs",
+    "dist:win": "pnpm run dist:win:prepackaged",
+    "dist:win:dir": "pnpm run prepare:prepackaged",
+    "dist:win:prepackaged": "pnpm run prepare:prepackaged && electron-builder --win portable --prepackaged artifacts/prepackaged -c.directories.output=artifacts/portable",
+    "dist:win:slim": "pnpm run build && pnpm run prepare:python && node scripts/prepare-prepackaged-app.cjs && electron-builder --win portable --prepackaged artifacts/prepackaged -c.directories.output=artifacts/portable",
     "preview": "vite preview --host 127.0.0.1",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
-    "vite": "^6.0.7",
-    "typescript": "^5.7.2",
+    "concurrently": "^9.1.0",
+    "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "lucide-react": "^0.468.0",
-    "electron": "^33.2.1",
-    "concurrently": "^9.1.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
     "wait-on": "^8.0.1"
   },
   "devDependencies": {
     "@types/react": "^19.0.2",
-    "@types/react-dom": "^19.0.2"
+    "@types/react-dom": "^19.0.2",
+    "electron": "^33.2.1",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "local.agent-flight-recorder",
+    "productName": "Agent Flight Recorder",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "asar": true,
+    "asarUnpack": [
+      "runner/**",
+      "skills/**"
+    ],
+    "files": [
+      "dist/**",
+      "electron/**",
+      "runner/**",
+      "skills/**",
+      "harness.config.json",
+      "package.json"
+    ],
+    "afterPack": "scripts/electron-builder-after-pack.cjs",
+    "win": {
+      "target": [
+        "portable"
+      ]
+    },
+    "directories": {
+      "output": "artifacts/electron-builder"
+    }
   }
 }
