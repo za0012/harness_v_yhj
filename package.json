@@ -15,6 +15,7 @@
     "dist:win:dir": "pnpm run prepare:prepackaged",
     "dist:win:prepackaged": "pnpm run prepare:prepackaged && electron-builder --win portable --prepackaged artifacts/prepackaged -c.directories.output=artifacts/portable",
     "dist:win:slim": "pnpm run build && pnpm run prepare:python && node scripts/prepare-prepackaged-app.cjs && electron-builder --win portable --prepackaged artifacts/prepackaged -c.directories.output=artifacts/portable",
+    "harness:release": "node scripts/harness-release.cjs",
     "preview": "vite preview --host 127.0.0.1",
     "typecheck": "tsc --noEmit"
   },

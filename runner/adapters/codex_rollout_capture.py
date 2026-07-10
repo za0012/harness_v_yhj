@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sqlite3
 import sys
 from datetime import datetime
@@ -20,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 TRACE_TOOLS = ROOT / "skills" / "agent-flight-recorder" / "scripts"
 sys.path.insert(0, str(TRACE_TOOLS))
 
-from trace_tools import analyze, append_event, init_run, recommend, record_metric, record_model_response, record_prompt  # noqa: E402
+from trace_tools import analyze, append_event, init_run, read_events, recommend, record_metric, record_model_response, record_prompt  # noqa: E402
 
 
 CODEX_HOME = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
@@ -29,7 +30,7 @@ STATE_DB = CODEX_HOME / "state_5.sqlite"
 
 def text_from_content(value: Any) -> str:
     if isinstance(value, str):
-        return value
+        return value.strip()
     if isinstance(value, list):
         parts: list[str] = []
         for item in value:
@@ -52,6 +53,50 @@ def compact(value: str, limit: int = 240) -> str:
     return cleaned[:limit] + ("..." if len(cleaned) > limit else "")
 
 
+def comparable_text(value: str) -> str:
+    return "\n".join(line.rstrip() for line in value.strip().splitlines())
+
+
+def is_injected_context(content: str) -> bool:
+    cleaned = content.strip()
+    if not cleaned:
+        return True
+    patterns = (
+        r"^#\s*AGENTS\.md instructions",
+        r"<environment_context>",
+        r"</INSTRUCTIONS>",
+        r"^The following is the Codex agent history",
+        r"^We need continue from summary",
+    )
+    return any(re.search(pattern, cleaned, re.IGNORECASE) for pattern in patterns)
+
+
+def cwd_variants(cwd: str | None) -> list[str]:
+    if not cwd:
+        return []
+    value = str(cwd)
+    prefix = "\\\\?\\"
+    variants = [value]
+    if value.startswith(prefix):
+        variants.append(value[len(prefix):])
+    else:
+        variants.append(f"{prefix}{value}")
+    return list(dict.fromkeys(variants))
+
+
+def is_user_visible_thread(row: dict[str, Any]) -> bool:
+    thread_source = str(row.get("thread_source") or "")
+    if thread_source == "subagent":
+        return False
+    source = str(row.get("source") or "")
+    if "subagent" in source.lower():
+        return False
+    title = str(row.get("title") or row.get("first_user_message") or "")
+    if is_injected_context(title):
+        return False
+    return True
+
+
 def connect_state() -> sqlite3.Connection:
     if not STATE_DB.exists():
         raise SystemExit(f"Codex state DB not found: {STATE_DB}")
@@ -64,30 +109,42 @@ def find_thread(thread_id: str | None = None, cwd: str | None = None) -> dict[st
     if thread_id:
         row = con.execute("select * from threads where id = ?", (thread_id,)).fetchone()
     elif cwd:
-        row = con.execute("select * from threads where cwd = ? order by updated_at_ms desc, updated_at desc limit 1", (cwd,)).fetchone()
+        variants = cwd_variants(cwd)
+        placeholders = ",".join("?" for _ in variants)
+        row = con.execute(
+            f"select * from threads where cwd in ({placeholders}) and coalesce(thread_source, 'user') <> 'subagent' order by updated_at_ms desc, updated_at desc limit 1",
+            variants,
+        ).fetchone()
     else:
-        row = con.execute("select * from threads order by updated_at_ms desc, updated_at desc limit 1").fetchone()
+        row = con.execute("select * from threads where coalesce(thread_source, 'user') <> 'subagent' order by updated_at_ms desc, updated_at desc limit 1").fetchone()
     if not row:
         raise SystemExit("No matching Codex thread found.")
-    return dict(row)
+    result = dict(row)
+    if not is_user_visible_thread(result):
+        raise SystemExit("Selected Codex thread is an internal subagent thread.")
+    return result
 
 
 def list_threads(cwd: str | None = None, limit: int = 30) -> list[dict[str, Any]]:
     con = connect_state()
     con.row_factory = sqlite3.Row
     if cwd:
+        variants = cwd_variants(cwd)
+        placeholders = ",".join("?" for _ in variants)
         rows = con.execute(
-            "select id, title, first_user_message, cwd, rollout_path, tokens_used, created_at_ms, updated_at_ms from threads where cwd = ? order by updated_at_ms desc, updated_at desc limit ?",
-            (cwd, limit),
+            f"select id, title, first_user_message, cwd, rollout_path, tokens_used, created_at_ms, updated_at_ms, thread_source, source, has_user_event from threads where cwd in ({placeholders}) and coalesce(thread_source, 'user') <> 'subagent' order by updated_at_ms desc, updated_at desc limit ?",
+            (*variants, limit),
         ).fetchall()
     else:
         rows = con.execute(
-            "select id, title, first_user_message, cwd, rollout_path, tokens_used, created_at_ms, updated_at_ms from threads order by updated_at_ms desc, updated_at desc limit ?",
+            "select id, title, first_user_message, cwd, rollout_path, tokens_used, created_at_ms, updated_at_ms, thread_source, source, has_user_event from threads where coalesce(thread_source, 'user') <> 'subagent' order by updated_at_ms desc, updated_at desc limit ?",
             (limit,),
         ).fetchall()
     result: list[dict[str, Any]] = []
     for row in rows:
         item = dict(row)
+        if not is_user_visible_thread(item):
+            continue
         title = item.get("title") or compact(str(item.get("first_user_message") or "Untitled Codex thread"), 70)
         updated_ms = item.get("updated_at_ms")
         updated_label = ""
@@ -100,8 +157,62 @@ def list_threads(cwd: str | None = None, limit: int = 30) -> list[dict[str, Any]
         item["updated_label"] = updated_label
         item["short_id"] = short_id
         item["has_rollout"] = isinstance(item.get("rollout_path"), str) and bool(item.get("rollout_path"))
+        item["is_internal"] = False
         result.append(item)
     return result
+
+
+def record_user_message_event(run_id: str, payload: dict[str, Any], source: str, timestamp: str | None) -> bool:
+    content = text_from_content(payload.get("message")) or text_from_content(payload.get("text_elements"))
+    if not content:
+        return False
+    if is_injected_context(content):
+        append_event(run_id, "decision", "Injected Codex context skipped", {"source": source, "timestamp": timestamp, "role": "user"}, timestamp=timestamp)
+        return True
+    return record_prompt_once(run_id, "user", content, "conversation", source, timestamp)
+
+
+def record_agent_message_event(run_id: str, payload: dict[str, Any], source: str, timestamp: str | None) -> bool:
+    content = text_from_content(payload.get("message")) or text_from_content(payload.get("last_agent_message"))
+    if not content:
+        return False
+    return record_model_response_once(run_id, content, source, timestamp)
+
+
+def record_prompt_once(run_id: str, role: str, content: str, prompt_kind: str, source: str, timestamp: str | None) -> bool:
+    normalized = comparable_text(content)
+    if any(
+        event.get("type") == "prompt"
+        and (event.get("data") or {}).get("role") == role
+        and comparable_text(str((event.get("data") or {}).get("content") or "")) == normalized
+        for event in read_events(run_id)[-80:]
+    ):
+        return False
+    record_prompt(run_id, role, normalized, prompt_kind, source, timestamp=timestamp)
+    return True
+
+
+def record_model_response_once(run_id: str, content: str, source: str, timestamp: str | None) -> bool:
+    normalized = comparable_text(content)
+    if any(
+        event.get("type") == "model_response"
+        and comparable_text(str((event.get("data") or {}).get("content") or "")) == normalized
+        for event in read_events(run_id)[-80:]
+    ):
+        return False
+    record_model_response(run_id, normalized, source, timestamp=timestamp)
+    return True
+
+
+def append_decision_once(run_id: str, summary: str, data: dict[str, Any], timestamp: str | None) -> bool:
+    if any(
+        event.get("type") == "decision"
+        and event.get("summary") == summary
+        for event in read_events(run_id)[-120:]
+    ):
+        return False
+    append_event(run_id, "decision", summary, data, timestamp=timestamp)
+    return True
 
 
 def iter_jsonl(path: Path) -> Iterable[dict[str, Any]]:
@@ -144,20 +255,18 @@ def import_rollout_file(
             session_payload = payload if isinstance(payload, dict) else {}
             base = session_payload.get("base_instructions")
             base_text = text_from_content(base)
-            if base_text:
-                record_prompt(run_id, "system", base_text, "base_instructions", "codex-rollout")
+            if base_text and record_prompt_once(run_id, "system", base_text, "base_instructions", "codex-rollout", timestamp):
                 imported += 1
-            append_event(run_id, "decision", "Codex session metadata imported", {"source": "codex-rollout", "timestamp": timestamp, "payload": session_payload})
-            imported += 1
+            if append_decision_once(run_id, "Codex session metadata imported", {"source": "codex-rollout", "timestamp": timestamp, "payload": session_payload}, timestamp):
+                imported += 1
             continue
 
         if event_type == "turn_context":
             if isinstance(payload, dict):
                 user_instructions = payload.get("user_instructions")
-                if isinstance(user_instructions, str) and user_instructions.strip():
-                    record_prompt(run_id, "developer", user_instructions, "project_instructions", "codex-rollout")
+                if isinstance(user_instructions, str) and user_instructions.strip() and record_prompt_once(run_id, "developer", user_instructions, "project_instructions", "codex-rollout", timestamp):
                     imported += 1
-                append_event(run_id, "decision", "Codex turn context imported", {"source": "codex-rollout", "timestamp": timestamp, "payload": payload})
+                append_event(run_id, "decision", "Codex turn context imported", {"source": "codex-rollout", "timestamp": timestamp, "payload": payload}, timestamp=timestamp)
                 imported += 1
             continue
 
@@ -166,47 +275,65 @@ def import_rollout_file(
             role = payload.get("role")
             content = text_from_content(payload.get("content"))
             if payload_type == "message" and role in {"user", "developer", "system"}:
-                record_prompt(run_id, str(role), content, "conversation", "codex-rollout")
-                imported += 1
+                if role == "user" and is_injected_context(content):
+                    append_event(run_id, "decision", "Injected Codex context skipped", {"source": "codex-rollout", "timestamp": timestamp, "role": role}, timestamp=timestamp)
+                    imported += 1
+                    continue
+                if record_prompt_once(run_id, str(role), content, "conversation", "codex-rollout", timestamp):
+                    imported += 1
                 continue
             if payload_type == "message" and role in {"assistant", "model"}:
-                record_model_response(run_id, content, "codex-rollout")
-                imported += 1
+                if record_model_response_once(run_id, content, "codex-rollout", timestamp):
+                    imported += 1
                 continue
             if payload_type in {"function_call", "tool_call", "local_shell_call"}:
                 name = payload.get("name") or payload.get("tool_name") or payload.get("call_id") or payload_type
-                append_event(run_id, "tool_call", f"{name} 호출", {"source": "codex-rollout", "timestamp": timestamp, "payload": payload})
+                append_event(run_id, "tool_call", f"{name} 호출", {"source": "codex-rollout", "timestamp": timestamp, "payload": payload}, timestamp=timestamp)
                 imported += 1
                 continue
             if payload_type in {"function_call_output", "tool_result", "local_shell_call_output"}:
-                append_event(run_id, "tool_result", "도구 실행 결과", {"source": "codex-rollout", "timestamp": timestamp, "payload": payload})
+                append_event(run_id, "tool_result", "도구 실행 결과", {"source": "codex-rollout", "timestamp": timestamp, "payload": payload}, timestamp=timestamp)
                 imported += 1
                 continue
-            append_event(run_id, "decision", compact(content or str(payload_type)), {"source": "codex-rollout", "timestamp": timestamp, "payload": payload})
+            append_event(run_id, "decision", compact(content or str(payload_type)), {"source": "codex-rollout", "timestamp": timestamp, "payload": payload}, timestamp=timestamp)
             imported += 1
             continue
 
         if event_type == "event_msg" and isinstance(payload, dict):
             payload_type = str(payload.get("type") or "")
-            if payload_type in {"task_completed", "turn_completed", "task_finished"}:
-                append_event(run_id, "outcome", "Codex turn completed", {"status": "completed", "source": "codex-rollout", "timestamp": timestamp, "payload": payload})
+            if payload_type == "user_message":
+                if record_user_message_event(run_id, payload, "codex-rollout", timestamp):
+                    imported += 1
+                continue
+            if payload_type == "agent_message":
+                if record_agent_message_event(run_id, payload, "codex-rollout", timestamp):
+                    imported += 1
+                continue
+            if payload_type in {"task_completed", "turn_completed", "task_finished", "task_complete"}:
+                append_event(run_id, "outcome", "Codex turn completed", {"status": "completed", "source": "codex-rollout", "timestamp": timestamp, "payload": payload}, timestamp=timestamp)
                 saw_outcome = True
             elif payload_type in {"task_failed", "turn_failed"}:
-                append_event(run_id, "outcome", "Codex turn failed", {"status": "failed", "source": "codex-rollout", "timestamp": timestamp, "payload": payload})
+                append_event(run_id, "outcome", "Codex turn failed", {"status": "failed", "source": "codex-rollout", "timestamp": timestamp, "payload": payload}, timestamp=timestamp)
                 saw_outcome = True
+            elif payload_type == "token_count":
+                token_info = payload.get("info") or {}
+                total = token_info.get("total_token_usage") or {}
+                tokens = total.get("total_tokens")
+                record_metric(run_id, token_count=tokens if isinstance(tokens, int) else None, timestamp=timestamp)
             else:
-                append_event(run_id, "decision", payload_type or "Codex event", {"source": "codex-rollout", "timestamp": timestamp, "payload": payload})
+                append_event(run_id, "decision", payload_type or "Codex event", {"source": "codex-rollout", "timestamp": timestamp, "payload": payload}, timestamp=timestamp)
             imported += 1
             continue
 
-        append_event(run_id, "decision", compact(str(event_type)), {"source": "codex-rollout", "timestamp": timestamp, "payload": payload})
+        append_event(run_id, "decision", compact(str(event_type)), {"source": "codex-rollout", "timestamp": timestamp, "payload": payload}, timestamp=timestamp)
         imported += 1
 
     created_ms = meta.get("created_at_ms")
     updated_ms = meta.get("updated_at_ms")
     duration_ms = updated_ms - created_ms if isinstance(created_ms, int) and isinstance(updated_ms, int) and updated_ms >= created_ms else None
     tokens = meta.get("tokens_used") if isinstance(meta.get("tokens_used"), int) else None
-    if tokens is not None or duration_ms is not None:
+    has_metric = any(event.get("type") == "metric" for event in read_events(run_id))
+    if not has_metric and (tokens is not None or duration_ms is not None):
         record_metric(run_id, duration_ms=duration_ms, token_count=tokens, success=True if saw_outcome else None)
         imported += 1
     if not saw_outcome:

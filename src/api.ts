@@ -215,7 +215,7 @@ export async function importTranscript(text: string, mission: string): Promise<I
 
 export async function listCodexThreads(scope: "workspace" | "all" = "workspace"): Promise<CodexThreadSummary[]> {
   return (
-    electronApi()?.listCodexThreads?.({ limit: 100, allWorkspaces: scope === "all" }).then((result) => result.threads) ?? [
+    electronApi()?.listCodexThreads?.({ limit: 100, allWorkspaces: scope === "all" }).then((result) => result.threads.filter((thread) => !thread.is_internal)) ?? [
       {
         id: "demo-thread",
         label: "Demo Codex thread",
@@ -242,12 +242,15 @@ export async function importLatestCodexThread(mission?: string, threadId?: strin
   );
 }
 
-export async function startLiveWatcher(mission?: string, threadId?: string): Promise<LiveWatcherStatus> {
+export async function startLiveWatcher(mission?: string, threadId?: string, cwd?: string): Promise<LiveWatcherStatus> {
   return (
-    electronApi()?.startLiveWatcher?.({ mission, threadId, slug: "codex-live", interval: 1 }) ?? {
+    electronApi()?.startLiveWatcher?.({ mission, threadId, cwd, slug: "codex-live", interval: 1 }) ?? {
       status: "started",
       process_status: "running",
       run_id: "demo-live-watcher",
+      cwd: "C:\\Users\\yhj\\Documents\\하네스",
+      project_path: "C:\\Users\\yhj\\Documents\\하네스",
+      project_name: "하네스",
       events_imported: 0,
     }
   );
@@ -263,6 +266,9 @@ export async function getLiveWatcherStatus(runId?: string | null): Promise<LiveW
       status: "stopped",
       process_status: "stopped",
       run_id: runId ?? null,
+      cwd: "C:\\Users\\yhj\\Documents\\하네스",
+      project_path: "C:\\Users\\yhj\\Documents\\하네스",
+      project_name: "하네스",
     }
   );
 }

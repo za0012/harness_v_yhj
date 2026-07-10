@@ -133,18 +133,37 @@ function runRolloutCapture(args) {
 
 let liveWatcher = null;
 let liveWatcherRunId = null;
+let liveWatcherProjectInfo = null;
+let liveWatcherThreadId = null;
+
+function liveProjectInfo(cwd) {
+  const projectPath = cwd || writableRoot();
+  return {
+    cwd: projectPath,
+    project_path: projectPath,
+    project_name: path.basename(projectPath),
+  };
+}
 
 function startLiveWatcher(payload = {}) {
   if (liveWatcher && !liveWatcher.killed) {
-    return Promise.resolve({ status: "running", run_id: liveWatcherRunId });
+    const requestedThreadId = payload.threadId || null;
+    if (!requestedThreadId || requestedThreadId === liveWatcherThreadId) {
+      return Promise.resolve({ status: "running", run_id: liveWatcherRunId, thread_id: liveWatcherThreadId, ...(liveWatcherProjectInfo || liveProjectInfo(payload.cwd)) });
+    }
+    liveWatcher.kill();
   }
 
   return new Promise((resolve, reject) => {
+    const projectInfo = liveProjectInfo(payload.cwd || writableRoot());
+    liveWatcherProjectInfo = projectInfo;
+    liveWatcherThreadId = payload.threadId || null;
+    liveWatcherRunId = payload.runId || null;
     const args = [
       liveWatcherTool(),
       "watch",
       "--cwd",
-      payload.cwd || writableRoot(),
+      projectInfo.cwd,
       "--mission",
       payload.mission || "Codex Desktop 실시간 감시",
       "--slug",
@@ -166,7 +185,7 @@ function startLiveWatcher(payload = {}) {
     const timeout = setTimeout(() => {
       if (!settled) {
         settled = true;
-        resolve({ status: "starting", run_id: liveWatcherRunId });
+        resolve({ status: "starting", run_id: liveWatcherRunId, thread_id: liveWatcherThreadId, ...projectInfo });
       }
     }, 3000);
 
@@ -179,10 +198,11 @@ function startLiveWatcher(payload = {}) {
         try {
           const message = JSON.parse(line);
           if (message.run_id) liveWatcherRunId = message.run_id;
+          if (message.project_path || message.cwd) liveWatcherProjectInfo = liveProjectInfo(message.project_path || message.cwd);
           if (!settled && message.status === "started") {
             settled = true;
             clearTimeout(timeout);
-            resolve(message);
+            resolve({ ...projectInfo, thread_id: liveWatcherThreadId, ...message });
           }
         } catch {
           // Keep the watcher alive even if a diagnostic line is not JSON.
@@ -200,7 +220,11 @@ function startLiveWatcher(payload = {}) {
       }
     });
     child.on("close", (code) => {
-      liveWatcher = null;
+      if (liveWatcher === child) {
+        liveWatcher = null;
+        liveWatcherProjectInfo = null;
+        liveWatcherThreadId = null;
+      }
       if (!settled) {
         settled = true;
         clearTimeout(timeout);
@@ -216,17 +240,25 @@ async function stopLiveWatcher() {
     liveWatcher.kill();
   }
   liveWatcher = null;
+  liveWatcherThreadId = null;
+  liveWatcherProjectInfo = null;
   return { status: "stopped", run_id: runId };
 }
 
 async function getLiveWatcherStatus(payload = {}) {
   const runId = payload.runId || liveWatcherRunId;
+  const projectInfo = liveProjectInfo(payload.cwd || writableRoot());
   if (!runId) {
-    return { status: liveWatcher && !liveWatcher.killed ? "running" : "stopped", run_id: null };
+    return { status: liveWatcher && !liveWatcher.killed ? "running" : "stopped", run_id: null, ...projectInfo };
   }
   const state = await runPython(liveWatcherTool(), ["status", "--run-id", runId]).catch(() => ({ status: "unknown", run_id: runId }));
+  const stateProjectInfo = liveProjectInfo(state.cwd || state.project_path || projectInfo.cwd);
   return {
+    ...stateProjectInfo,
     ...state,
+    cwd: state.cwd || stateProjectInfo.cwd,
+    project_path: state.project_path || state.cwd || stateProjectInfo.project_path,
+    project_name: state.project_name || stateProjectInfo.project_name,
     process_status: liveWatcher && !liveWatcher.killed ? "running" : "stopped",
     run_id: runId,
   };
@@ -269,12 +301,23 @@ function eventContent(event) {
   return "";
 }
 
+function isInjectedContextText(value) {
+  const text = String(value || "").trim();
+  return (
+    !text ||
+    /^#\s*AGENTS\.md instructions/i.test(text) ||
+    /<environment_context>|<\/INSTRUCTIONS>/i.test(text) ||
+    /^The following is the Codex agent history/i.test(text) ||
+    /^We need continue from summary/i.test(text)
+  );
+}
+
 function runTitle(events) {
   const mission = events.find((event) => event.type === "mission");
   const missionText = mission?.summary || "";
-  const looksGeneric = /Codex 작업 기록|Imported Codex|Codex Desktop 실시간 감시/.test(missionText);
+  const looksGeneric = /Codex 작업 기록|Imported Codex|Codex Desktop 실시간 감시/.test(missionText) || isInjectedContextText(missionText);
   if (missionText && !looksGeneric) return compactText(missionText);
-  const userPrompt = events.find((event) => event.type === "prompt" && event.data?.role === "user");
+  const userPrompt = events.find((event) => event.type === "prompt" && event.data?.role === "user" && !isInjectedContextText(eventContent(event)));
   const content = eventContent(userPrompt);
   if (content) return compactText(content);
   return compactText(missionText || "Untitled mission");

@@ -52,9 +52,9 @@ def read_events(run_id: str) -> list[dict[str, Any]]:
     return events
 
 
-def append_event(run_id: str, event_type: str, summary: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
+def append_event(run_id: str, event_type: str, summary: str, data: dict[str, Any] | None = None, timestamp: str | None = None) -> dict[str, Any]:
     event = {
-        "timestamp": now_iso(),
+        "timestamp": timestamp or now_iso(),
         "run_id": run_id,
         "type": event_type,
         "summary": summary,
@@ -74,12 +74,14 @@ def record_prompt(
     prompt_kind: str = "task",
     source: str = "manual",
     step_id: str | None = None,
+    timestamp: str | None = None,
 ) -> dict[str, Any]:
     return append_event(
         run_id,
         "prompt",
         f"{role} prompt recorded",
         {"role": role, "prompt_kind": prompt_kind, "content": content, "source": source, "step_id": step_id},
+        timestamp=timestamp,
     )
 
 
@@ -90,12 +92,14 @@ def record_model_response(
     step_id: str | None = None,
     thread_id: str | None = None,
     finish_reason: str | None = None,
+    timestamp: str | None = None,
 ) -> dict[str, Any]:
     return append_event(
         run_id,
         "model_response",
         "Model response recorded",
         {"content": content, "source": source, "step_id": step_id, "thread_id": thread_id, "finish_reason": finish_reason},
+        timestamp=timestamp,
     )
 
 
@@ -107,6 +111,7 @@ def record_metric(
     user_intervention_count: int | None = None,
     success: bool | None = None,
     step_id: str | None = None,
+    timestamp: str | None = None,
 ) -> dict[str, Any]:
     return append_event(
         run_id,
@@ -120,6 +125,7 @@ def record_metric(
             "success": success,
             "step_id": step_id,
         },
+        timestamp=timestamp,
     )
 
 
@@ -411,13 +417,124 @@ def prompt_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [event for event in events if event.get("type") == "prompt"]
 
 
-def prompt_excerpt(events: list[dict[str, Any]], role: str = "user", limit: int = 420) -> str:
+def prompt_excerpt(events: list[dict[str, Any]], role: str = "user", limit: int = 2400) -> str:
     for event in reversed(prompt_events(events)):
         data = event.get("data") or {}
         if data.get("role") == role and isinstance(data.get("content"), str):
             content = data["content"].strip()
             return content[:limit] + ("..." if len(content) > limit else "")
     return ""
+
+
+def has_prompt_section(prompt: str, needles: tuple[str, ...]) -> bool:
+    return has_any(prompt.lower(), needles)
+
+
+def patch_item(title: str, before: str, after: str, reason: str, evidence: str) -> dict[str, str]:
+    return {
+        "title": title,
+        "before": before,
+        "after": after,
+        "reason": reason,
+        "evidence": evidence,
+    }
+
+
+def build_prompt_patch(
+    original_prompt: str,
+    task: str,
+    ids: set[str],
+    analysis: dict[str, Any],
+    evidence: list[str],
+    success_criteria: list[str],
+    tool_policy: list[str],
+    retry_strategy: list[str],
+) -> list[dict[str, str]]:
+    prompt = original_prompt or task
+    patch: list[dict[str, str]] = []
+    evidence_text = evidence[0] if evidence else "이번 run의 이벤트와 진단 결과를 근거로 보완했습니다."
+
+    if not has_prompt_section(prompt, ("완료 조건", "성공 조건", "success criteria", "definition of done", "검증 기준")):
+        patch.append(
+            patch_item(
+                "완료 조건 추가",
+                "완료 기준이 문장 안에 흩어져 있거나 없습니다.",
+                "완료 조건:\n" + "\n".join(f"- {item}" for item in success_criteria[:5]),
+                "에이전트가 스스로 끝났다고 판단할 수 있는 체크리스트가 필요합니다.",
+                evidence_text,
+            )
+        )
+
+    if not has_prompt_section(prompt, ("하지 말", "금지", "승인 없이", "do not", "must not")) or "missing_forbidden_actions" in ids:
+        patch.append(
+            patch_item(
+                "금지 행동 명시",
+                "삭제, 리셋, 배포, 외부 전송 같은 위험 행동의 기준이 없습니다.",
+                "금지 행동:\n- 명시 승인 없이 삭제, 리셋, 배포, 외부 전송, 대규모 리팩터링을 하지 않는다.\n- 기존 변경을 되돌리지 않고 필요한 부분만 수정한다.",
+                "무중단 루프일수록 자율성과 안전 경계가 같이 필요합니다.",
+                next((item for item in evidence if "오류" in item or "검증" in item), evidence_text),
+            )
+        )
+
+    if not has_prompt_section(prompt, ("검증", "validation", "test", "smoke")) or "missing_validation" in ids:
+        patch.append(
+            patch_item(
+                "검증 단계 추가",
+                "수정 후 어떤 명령이나 확인으로 성공을 증명할지 부족합니다.",
+                "검증:\n- 가능한 자동 테스트나 smoke 명령을 실행한다.\n- 실패하면 원인을 분류하고 최대 2회 복구한다.\n- 실행 결과를 짧게 기록한다.",
+                "실패와 복구가 로그에 남아야 다음 추천이 실제 근거를 가질 수 있습니다.",
+                next((item for item in evidence if "검증" in item), evidence_text),
+            )
+        )
+
+    if not has_prompt_section(prompt, ("최종 답변", "출력 형식", "final response", "output format")):
+        patch.append(
+            patch_item(
+                "최종 답변 형식 고정",
+                "마지막 보고 형식이 정해져 있지 않습니다.",
+                "최종 답변:\n- 무엇을 바꿨는지\n- 어떤 검증을 통과했는지\n- 남은 위험",
+                "보고 형식을 고정하면 사용자가 매번 QA 담당자처럼 되묻지 않아도 됩니다.",
+                evidence_text,
+            )
+        )
+
+    if analysis.get("error_count", 0) > 0 or "missing_retry_strategy" in ids:
+        patch.append(
+            patch_item(
+                "복구 전략 추가",
+                "실패했을 때 같은 명령을 반복할지, 다른 경로로 복구할지 기준이 약합니다.",
+                "복구:\n- 실패 원인을 권한, 환경, 입력 부족, 코드 오류로 분류한다.\n- 같은 실패를 반복하지 않고 더 작은 범위나 다른 검증 경로로 재시도한다.",
+                "이전 run의 오류가 다음 run에서 재발하지 않도록 실행 규칙을 넣었습니다.",
+                next((item for item in evidence if "오류" in item or "실패" in item), evidence_text),
+            )
+        )
+
+    if not patch:
+        patch.append(
+            patch_item(
+                "비교 기준 선명화",
+                "원문 프롬프트는 큰 누락이 적지만 다음 run에서 비교할 기준이 약합니다.",
+                "비교 기준:\n- 성공 여부\n- 오류 수\n- 검증 수\n- 실행 시간\n- 사용자 개입 횟수",
+                "Before/After 비교가 의미 있으려면 측정할 지표가 프롬프트에 드러나야 합니다.",
+                evidence_text,
+            )
+        )
+
+    return patch
+
+
+def rewrite_user_prompt(original_prompt: str, task: str, patch: list[dict[str, str]]) -> str:
+    base = (original_prompt or task).strip()
+    if not base:
+        base = task
+    additions = []
+    for item in patch:
+        after = item.get("after", "").strip()
+        if after and after not in base:
+            additions.append(after)
+    if not additions:
+        return base
+    return base.rstrip() + "\n\n" + "\n\n".join(additions)
 
 
 def tool_names(events: list[dict[str, Any]]) -> list[str]:
@@ -529,6 +646,18 @@ def recommend(run_id: str, task: str) -> dict[str, Any]:
         "같은 오류가 반복되면 범위를 줄여 검증 가능한 최소 산출물까지 완주한다.",
         "권한이나 필수 입력이 없으면 중단 지점과 다음 행동을 outcome에 남긴다.",
     ]
+    prompt_patch = build_prompt_patch(
+        original_user_prompt,
+        task,
+        ids,
+        analysis,
+        evidence,
+        success_criteria,
+        tool_policy,
+        retry_strategy,
+    )
+    rewritten_user_prompt = rewrite_user_prompt(original_user_prompt, task, prompt_patch)
+    rewrite_summary = [f"{item['title']}: {item['reason']}" for item in prompt_patch]
 
     prompt = (
         f"Mission:\n{task}\n\n"
@@ -558,6 +687,14 @@ def recommend(run_id: str, task: str) -> dict[str, Any]:
         "diagnosis_issues": issues,
         "original_user_prompt": original_user_prompt,
         "original_system_prompt": original_system_prompt,
+        "rewritten_user_prompt": rewritten_user_prompt,
+        "rewrite_summary": rewrite_summary,
+        "prompt_patch": prompt_patch,
+        "recommendation_mode_prompts": {
+            "polish": rewritten_user_prompt,
+            "harness": user_prompt,
+            "next_run": prompt,
+        },
         "prompt_fixes": actions,
         "used_tools": used_tools,
         "system_prompt": system_prompt,
@@ -567,7 +704,8 @@ def recommend(run_id: str, task: str) -> dict[str, Any]:
         "retry_strategy": retry_strategy,
         "copy_prompt": (
             f"## System Prompt\n{system_prompt}\n\n"
-            f"## User Prompt\n{user_prompt}\n\n"
+            f"## Rewritten User Prompt\n{rewritten_user_prompt}\n\n"
+            f"## Harness User Prompt\n{user_prompt}\n\n"
             "## Tool Policy\n"
             + "\n".join(f"- {item}" for item in tool_policy)
             + "\n\n## Validation Checklist\n"

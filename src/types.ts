@@ -67,6 +67,14 @@ export type Recommendation = {
   diagnosis_issues?: DiagnosisIssue[];
   original_user_prompt?: string;
   original_system_prompt?: string;
+  rewritten_user_prompt?: string;
+  rewrite_summary?: string[];
+  prompt_patch?: PromptPatch[];
+  recommendation_mode_prompts?: {
+    polish?: string;
+    harness?: string;
+    next_run?: string;
+  };
   prompt_fixes?: string[];
   used_tools?: string[];
   system_prompt?: string;
@@ -77,6 +85,14 @@ export type Recommendation = {
   copy_prompt?: string;
   recommended_prompt: string;
   verification_checklist: string[];
+};
+
+export type PromptPatch = {
+  title: string;
+  before: string;
+  after: string;
+  reason: string;
+  evidence?: string;
 };
 
 export type ComparisonMetric = {
@@ -121,6 +137,8 @@ export type CodexThreadSummary = {
   updated_label?: string;
   short_id?: string;
   has_rollout?: boolean;
+  thread_source?: string;
+  is_internal?: boolean;
 };
 
 export type LiveWatcherStatus = {
@@ -128,6 +146,9 @@ export type LiveWatcherStatus = {
   process_status?: "running" | "stopped" | string;
   run_id?: string | null;
   thread_id?: string | null;
+  cwd?: string;
+  project_path?: string;
+  project_name?: string;
   rollout_path?: string;
   offset?: number;
   events_imported?: number;

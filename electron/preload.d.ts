@@ -16,7 +16,7 @@ declare global {
       listCodexThreads(payload?: { cwd?: string; limit?: number; allWorkspaces?: boolean }): Promise<{ threads: CodexThreadSummary[] }>;
       startLiveWatcher(payload?: { cwd?: string; threadId?: string; mission?: string; runId?: string; slug?: string; interval?: number }): Promise<LiveWatcherStatus>;
       stopLiveWatcher(): Promise<LiveWatcherStatus>;
-      getLiveWatcherStatus(payload?: { runId?: string }): Promise<LiveWatcherStatus>;
+      getLiveWatcherStatus(payload?: { runId?: string; cwd?: string }): Promise<LiveWatcherStatus>;
       startSupervisor(payload: { slug: string; mission: string; planFile?: string; noResume?: boolean }): Promise<SupervisorResult>;
       startAutopilot(payload: { slug: string; mission: string; planFile?: string; maxCycles?: number }): Promise<SupervisorResult>;
       resumeSupervisor(runId: string): Promise<SupervisorResult>;

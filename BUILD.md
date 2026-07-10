@@ -16,6 +16,14 @@ Run Node and pnpm commands from Git Bash.
 Open Git Bash in the repository root, then run:
 
 ```bash
+pnpm run harness:release
+```
+
+This is the recommended release gate. It builds the renderer, runs smoke checks, prepares a timestamped prepackaged app, creates a portable exe, launches the exe, verifies that the process stays alive for at least five seconds, writes a SHA256 hash, and stores a Flight Recorder report under `.harness/runs/<run_id>`.
+
+For manual packaging only, run:
+
+```bash
 pnpm run dist:win
 ```
 

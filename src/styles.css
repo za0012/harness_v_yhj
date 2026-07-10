@@ -154,7 +154,6 @@ button:disabled {
 }
 
 .run-list::-webkit-scrollbar,
-.timeline::-webkit-scrollbar,
 .prompt-output::-webkit-scrollbar {
   display: none;
 }
@@ -667,6 +666,29 @@ button:disabled {
   font-size: 12px;
 }
 
+.live-project {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid #d7e6ff;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.live-project span {
+  color: #3182f6;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.live-project strong {
+  font-size: 15px;
+}
+
+.live-project small {
+  color: #4e5968;
+}
+
 .danger-text {
   color: #f04452 !important;
 }
@@ -716,16 +738,127 @@ button:disabled {
 }
 
 .timeline-panel {
+  height: min(760px, calc(100vh - 178px));
   min-height: 520px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .timeline {
-  max-height: 560px;
-  overflow: auto;
+  flex: 1 1 auto;
+  height: auto;
+  max-height: none;
+  min-height: 0;
+  overflow-y: scroll;
+  overflow-x: hidden;
+  padding-right: 8px;
+  overscroll-behavior: contain;
+  scrollbar-color: #b0b8c1 #edf0f2;
+  scrollbar-width: thin;
+}
+
+.timeline-group + .timeline-group {
+  margin-top: 12px;
+}
+
+.timeline::-webkit-scrollbar {
+  width: 10px;
+}
+
+.timeline::-webkit-scrollbar-track {
+  background: #edf0f2;
+  border-radius: 999px;
+}
+
+.timeline::-webkit-scrollbar-thumb {
+  min-height: 56px;
+  background: #b0b8c1;
+  border: 2px solid #edf0f2;
+  border-radius: 999px;
+}
+
+.timeline::-webkit-scrollbar-thumb:hover {
+  background: #8b95a1;
+}
+
+.timeline-group {
+  border: 1px solid #e5e8eb;
+  border-radius: 10px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.timeline-group-summary {
+  width: 100%;
+  min-height: 72px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 0;
+  cursor: pointer;
+  background: #f9fafb;
+  text-align: left;
+}
+
+.timeline-group.open .timeline-group-summary {
+  border-bottom: 1px solid #e5e8eb;
+  background: #ffffff;
+}
+
+.timeline-turn-main {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  scrollbar-width: none;
+  gap: 4px;
+}
+
+.timeline-group-summary strong {
+  color: #191f28;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+.timeline-turn-label {
+  color: #3182f6;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.timeline-group-summary time,
+.timeline-turn-count {
+  color: #8b95a1;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.timeline-turn-count {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.timeline-group-chevron {
+  flex: 0 0 auto;
+  color: #8b95a1;
+  transition: transform 160ms ease;
+}
+
+.timeline-group.open .timeline-group-chevron {
+  transform: rotate(180deg);
+}
+
+.timeline-group-events {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #ffffff;
 }
 
 .timeline-item {
@@ -735,6 +868,10 @@ button:disabled {
   padding: 14px;
   border-radius: 10px;
   background: #f9fafb;
+}
+
+.timeline-group .timeline-item {
+  border: 1px solid #edf0f2;
 }
 
 .timeline-icon {
@@ -918,6 +1055,53 @@ button:disabled {
   line-height: 1.5;
 }
 
+.coach-panel {
+  background: #fbfcfd;
+}
+
+.coach-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.coach-grid article {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid #e5e8eb;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.coach-grid span {
+  color: #8b95a1;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.coach-grid strong {
+  display: block;
+  margin-top: 7px;
+  color: #191f28;
+  line-height: 1.45;
+  font-size: 15px;
+}
+
+.coach-grid p,
+.coach-grid li {
+  color: #4e5968;
+  line-height: 1.55;
+}
+
+.coach-grid p {
+  margin: 8px 0 0;
+}
+
+.coach-grid ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
 .prompt-source-summary {
   margin-bottom: 12px;
   display: flex;
@@ -1085,6 +1269,12 @@ button:disabled {
   gap: 12px;
 }
 
+.rewrite-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
 .recommendation-flow {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1147,6 +1337,11 @@ button:disabled {
   background: #f9fafb;
 }
 
+.variant-card.active {
+  border: 1px solid #3182f6;
+  background: #eef6ff;
+}
+
 .variant-card div {
   display: flex;
   flex-direction: column;
@@ -1194,6 +1389,103 @@ button:disabled {
   padding-left: 20px;
   color: #356196;
   line-height: 1.6;
+}
+
+.patch-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.patch-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #d9eaff;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.patch-card strong {
+  display: block;
+  color: #191f28;
+  font-size: 14px;
+}
+
+.patch-card p,
+.patch-card small {
+  display: block;
+  margin-top: 8px;
+  color: #356196;
+  line-height: 1.5;
+}
+
+.patch-card dl {
+  margin: 12px 0 0;
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 8px 10px;
+}
+
+.patch-card dt {
+  color: #8b95a1;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.patch-card dd {
+  margin: 0;
+  color: #4e5968;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+  font-size: 12px;
+}
+
+.mode-tabs {
+  padding: 4px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  border-radius: 10px;
+  background: #e5e8eb;
+}
+
+.mode-tabs button {
+  min-height: 58px;
+  padding: 9px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 8px;
+  color: #6b7684;
+  background: transparent;
+  text-align: left;
+}
+
+.mode-tabs button.active {
+  color: #191f28;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(25, 31, 40, 0.06);
+}
+
+.mode-tabs strong {
+  font-size: 13px;
+}
+
+.mode-tabs span {
+  line-height: 1.35;
+  font-size: 11px;
+}
+
+.prompt-output.selected {
+  margin-top: 0;
+  color: #273444;
+  background: #ffffff;
+  border: 1px solid #e5e8eb;
 }
 
 .recommendation-flow article {
@@ -1414,9 +1706,22 @@ button:disabled {
   .run-list,
   .stat-grid,
   .prompt-grid,
+  .rewrite-grid,
+  .patch-grid,
   .recommendation-flow,
+  .mode-tabs,
+  .coach-grid,
   .compare-selects {
     grid-template-columns: 1fr;
+  }
+
+  .timeline-group-summary {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .timeline-turn-count {
+    flex: 0 1 auto;
   }
 
   .prompt-thread-item summary {

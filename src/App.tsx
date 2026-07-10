@@ -1,6 +1,7 @@
 import {
   AlertCircle,
   ArrowRight,
+  ChevronDown,
   CheckCircle2,
   Clipboard,
   Clock3,
@@ -56,6 +57,7 @@ import type {
 type TabId = "import" | "records" | "recommend" | "compare" | "notes";
 type ImportMode = "codex" | "paste";
 type NotesMode = "how" | "patch";
+type RecommendationMode = "polish" | "harness" | "next_run";
 
 const tabs: Array<{ id: TabId; label: string }> = [
   { id: "records", label: "실행 기록" },
@@ -170,12 +172,33 @@ const patchNotes = [
 
 function formatTime(value?: string) {
   if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("ko-KR", {
+    year: "2-digit",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(new Date(value));
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function formatTimeRange(start?: string, end?: string) {
+  if (!start) return "-";
+  if (!end || start === end) return formatTime(start);
+  return `${formatTime(start)} - ${formatTime(end)}`;
+}
+
+function eventTime(event: TraceEvent) {
+  const sourceTimestamp = event.data?.timestamp;
+  return typeof sourceTimestamp === "string" && sourceTimestamp ? sourceTimestamp : event.timestamp;
+}
+
+function sourceEventTime(event: TraceEvent) {
+  const sourceTimestamp = event.data?.timestamp;
+  return typeof sourceTimestamp === "string" && sourceTimestamp ? sourceTimestamp : null;
 }
 
 function formatDuration(ms: unknown) {
@@ -213,6 +236,20 @@ function safeText(value: string | undefined | null, fallback = "이전 로그의
 
 function copyText(text: string) {
   void navigator.clipboard?.writeText(text);
+}
+
+function lastPathSegment(value?: string | null) {
+  if (!value) return "";
+  const normalized = value.replace(/[\\/]+$/, "");
+  return normalized.split(/[\\/]/).filter(Boolean).pop() || value;
+}
+
+function watchedProjectName(status: LiveWatcherStatus | null, selectedThread?: CodexThreadSummary | null) {
+  return status?.project_name || lastPathSegment(status?.project_path || status?.cwd) || lastPathSegment(selectedThread?.cwd) || "확인 중";
+}
+
+function watchedProjectPath(status: LiveWatcherStatus | null, selectedThread?: CodexThreadSummary | null) {
+  return status?.project_path || status?.cwd || selectedThread?.cwd || "";
 }
 
 function firstUsefulLine(value: string) {
@@ -392,35 +429,220 @@ function timelineTitle(event: TraceEvent) {
   return eventLabels[event.type];
 }
 
+type TimelineGroup = {
+  id: string;
+  title: string;
+  start?: string;
+  end?: string;
+  events: TraceEvent[];
+};
+
+function isUserTurnStart(event: TraceEvent) {
+  if (event.type !== "prompt" || event.data?.role !== "user") return false;
+  const content = promptContent(event).trim();
+  if (!content) return false;
+  if (/^#\s*AGENTS\.md instructions/i.test(content)) return false;
+  if (/<environment_context>|<\/INSTRUCTIONS>/i.test(content)) return false;
+  if (/^The following is the Codex agent history/i.test(content)) return false;
+  return true;
+}
+
+function userTurnTitle(event: TraceEvent) {
+  if (event.type === "prompt") return firstUsefulLine(promptContent(event));
+  return firstUsefulLine(event.summary);
+}
+
+function timelineGroups(events: TraceEvent[]): TimelineGroup[] {
+  const hasUserTurns = events.some(isUserTurnStart);
+  const groups: TimelineGroup[] = [];
+  let current: TimelineGroup | null = null;
+  let pendingContext: TraceEvent[] = [];
+
+  events.forEach((event, index) => {
+    const startsUserTurn = isUserTurnStart(event) || (!hasUserTurns && event.type === "mission");
+      const startsGroup = startsUserTurn || !current;
+    if (startsGroup) {
+      if (!startsUserTurn) {
+        pendingContext.push(event);
+        return;
+      }
+      if (current) groups.push(normalizeTimelineGroup(current));
+      const title = startsUserTurn ? userTurnTitle(event) : "사용자 프롬프트 이전 기록";
+      const nextGroup: TimelineGroup = {
+        id: `${event.timestamp}-${index}`,
+        title: safeText(title, "사용자 프롬프트"),
+        start: eventTime(event),
+        end: eventTime(event),
+        events: [...pendingContext, event],
+      };
+      pendingContext = [];
+      current = nextGroup;
+      return;
+    }
+
+    if (!current) return;
+    const activeGroup = current;
+    activeGroup.events.push(event);
+    activeGroup.end = eventTime(event);
+  });
+
+  if (!current && pendingContext.length) {
+    groups.push(normalizeTimelineGroup({
+      id: `context-${pendingContext[0]?.timestamp || "start"}`,
+      title: "사용자 프롬프트 이전 기록",
+      start: pendingContext[0] ? eventTime(pendingContext[0]) : undefined,
+      end: pendingContext[pendingContext.length - 1] ? eventTime(pendingContext[pendingContext.length - 1]) : undefined,
+      events: pendingContext,
+    }));
+  }
+  if (current) groups.push(normalizeTimelineGroup(current));
+  return groups;
+}
+
+function normalizeTimelineGroup(group: TimelineGroup): TimelineGroup {
+  const sourceTimes = group.events.map(sourceEventTime).filter((value): value is string => Boolean(value));
+  if (sourceTimes.length) {
+    return {
+      ...group,
+      start: sourceTimes[0],
+      end: sourceTimes[sourceTimes.length - 1],
+    };
+  }
+  return group;
+}
+
 function Timeline({ detail }: { detail: RunDetail | null }) {
+  const groups = useMemo(() => (detail ? timelineGroups(detail.events) : []), [detail]);
+  const [openGroupIds, setOpenGroupIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setOpenGroupIds(new Set());
+  }, [detail?.run_id, groups.length]);
+
   if (!detail) return <div className="empty-light">왼쪽에서 실행을 선택하거나 로그를 가져오세요.</div>;
+
+  const toggleGroup = (groupId: string) => {
+    setOpenGroupIds((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  };
 
   return (
     <div className="timeline">
-      {detail.events.map((event, index) => {
-        const Icon = eventIcons[event.type];
+      {groups.map((group, groupIndex) => {
+        const errorCount = group.events.filter((event) => event.type === "error").length;
+        const validationCount = group.events.filter((event) => event.type === "validation").length;
+        const isOpen = openGroupIds.has(group.id);
         return (
-          <article className={`timeline-item ${event.type}`} key={`${event.timestamp}-${event.type}-${index}`}>
-            <div className="timeline-icon">
-              <Icon size={16} />
-            </div>
-            <div className="timeline-content">
-              <div className="timeline-title">
-                <strong>{timelineTitle(event)}</strong>
-                <time>{formatTime(event.timestamp)}</time>
+          <article className={isOpen ? "timeline-group open" : "timeline-group"} key={group.id}>
+            <div
+              className="timeline-group-summary"
+              onClick={() => toggleGroup(group.id)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  toggleGroup(group.id);
+                }
+              }}
+              role="button"
+              tabIndex={0}
+              aria-expanded={isOpen}
+            >
+              <div className="timeline-turn-main">
+                <span className="timeline-turn-label">사용자 입력 {groupIndex + 1}</span>
+                <strong>{group.title}</strong>
+                <time>{formatTimeRange(group.start, group.end)}</time>
               </div>
-              <p>{safeText(event.summary)}</p>
-              {event.data && Object.keys(event.data).length > 0 ? (
-                <details>
-                  <summary>원본 데이터 보기</summary>
-                  <pre>{JSON.stringify(event.data, null, 2)}</pre>
-                </details>
-              ) : null}
+              <span className="timeline-turn-count">
+                이벤트 {group.events.length}개
+                {validationCount ? ` · 검증 ${validationCount}` : ""}
+                {errorCount ? ` · 오류 ${errorCount}` : ""}
+              </span>
+              <ChevronDown className="timeline-group-chevron" size={18} />
             </div>
+            {isOpen ? (
+              <div className="timeline-group-events">
+                {group.events.map((event, index) => {
+                  const Icon = eventIcons[event.type];
+                  return (
+                    <article className={`timeline-item ${event.type}`} key={`${event.timestamp}-${event.type}-${index}`}>
+                      <div className="timeline-icon">
+                        <Icon size={16} />
+                      </div>
+                      <div className="timeline-content">
+                        <div className="timeline-title">
+                          <strong>{timelineTitle(event)}</strong>
+                          <time>{formatTime(eventTime(event))}</time>
+                        </div>
+                        <p>{safeText(event.summary)}</p>
+                        {event.data && Object.keys(event.data).length > 0 ? (
+                          <details>
+                            <summary>원본 데이터 보기</summary>
+                            <pre>{JSON.stringify(event.data, null, 2)}</pre>
+                          </details>
+                        ) : null}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : null}
           </article>
         );
       })}
     </div>
+  );
+}
+
+function CoachBriefPanel({
+  detail,
+  analysis,
+  recommendation,
+}: {
+  detail: RunDetail | null;
+  analysis: Analysis | null;
+  recommendation: Recommendation | null;
+}) {
+  const userPromptCount = detail?.events.filter(isUserTurnStart).length ?? 0;
+  const errorCount = analysis?.error_count ?? 0;
+  const validationCount = analysis?.validation_count ?? 0;
+  const toolCallCount = analysis?.tool_call_count ?? 0;
+  const issues = recommendation?.diagnosis_issues ?? analysis?.diagnosis_issues ?? [];
+  const patch = recommendation?.prompt_patch ?? [];
+  const nextActions = [
+    validationCount === 0 ? "다음 run에서는 최소 1개 이상의 검증 이벤트를 남기세요." : `검증 ${validationCount}개가 기록되었습니다. 다음에는 검증 실패/성공 근거를 더 짧게 요약하세요.`,
+    errorCount > 0 ? "오류가 있는 구간을 먼저 펼쳐 보고 같은 실패를 반복하지 않도록 복구 규칙을 프롬프트에 넣으세요." : "오류는 기록되지 않았습니다. 이제 반복 도구 호출이나 불필요한 대기 시간을 줄이는 쪽을 보세요.",
+    patch[0]?.title ? `추천 프롬프트에는 '${patch[0].title}' 패치가 우선 적용되었습니다.` : "추천을 생성하면 원문 프롬프트에 적용할 첫 번째 패치를 보여줍니다.",
+  ];
+
+  return (
+    <Panel className="coach-panel">
+      <SectionHeader label="Coach" title="다음 조종 포인트" />
+      <div className="coach-grid">
+        <article>
+          <span>Run 구조</span>
+          <strong>프롬프트 턴 {userPromptCount}개</strong>
+          <p>타임라인은 사용자가 보낸 프롬프트를 기준으로 접어서 볼 수 있습니다.</p>
+        </article>
+        <article>
+          <span>실행 신호</span>
+          <strong>도구 {toolCallCount} · 오류 {errorCount} · 검증 {validationCount}</strong>
+          <p>{issues[0] ? safeText(issues[0].title) : "큰 진단 이슈가 없으면 검증 품질과 실행 시간을 비교하세요."}</p>
+        </article>
+        <article>
+          <span>다음 액션</span>
+          <strong>{nextActions[0]}</strong>
+          <ul>
+            {nextActions.slice(1).map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </article>
+      </div>
+    </Panel>
   );
 }
 
@@ -528,22 +750,40 @@ function RecommendationPanel({
   const evidence = recommendation?.evidence ?? [];
   const issues = recommendation?.diagnosis_issues ?? analysis?.diagnosis_issues ?? [];
   const fixes = recommendation?.prompt_fixes ?? [];
+  const patch = recommendation?.prompt_patch ?? [];
+  const [recommendationMode, setRecommendationMode] = useState<RecommendationMode>("polish");
+  const modeLabels: Record<RecommendationMode, { title: string; note: string }> = {
+    polish: { title: "원문 다듬기", note: "사용자 프롬프트를 최소 수정" },
+    harness: { title: "하네스 강화", note: "도구, 검증, 재시도 규칙 추가" },
+    next_run: { title: "다음 실행용", note: "새 실행에 바로 넣는 전체 프롬프트" },
+  };
+  const modePrompt =
+    recommendation?.recommendation_mode_prompts?.[recommendationMode] ||
+    (recommendationMode === "polish"
+      ? recommendation?.rewritten_user_prompt
+      : recommendationMode === "harness"
+        ? recommendation?.user_prompt
+        : recommendation?.recommended_prompt) ||
+    "";
   const copyPrompt = recommendation?.copy_prompt || recommendation?.recommended_prompt || "";
   const variants = [
     {
-      title: "실전 실행형",
-      note: "다음 Codex 실행에 바로 붙여넣기 좋은 형태",
-      text: recommendation?.recommended_prompt,
+      id: "polish" as const,
+      title: "원문 다듬기",
+      note: "원문을 보존하면서 빠진 조건만 덧붙입니다.",
+      text: recommendation?.rewritten_user_prompt,
     },
     {
-      title: "하네스 관찰형",
-      note: "도구 호출, 오류, 검증 기록을 더 촘촘히 요구",
+      id: "harness" as const,
+      title: "하네스 강화",
+      note: "도구 호출, 오류, 검증 기록을 더 촘촘히 요구합니다.",
       text: recommendation?.user_prompt,
     },
     {
-      title: "복구 중심형",
-      note: "실패 원인 분류와 재시도 전략을 강조",
-      text: recommendation?.retry_strategy?.join("\n"),
+      id: "next_run" as const,
+      title: "다음 실행용",
+      note: "다음 Codex 실행에 바로 붙여넣기 좋은 전체 형태입니다.",
+      text: recommendation?.recommended_prompt,
     },
   ];
 
@@ -586,28 +826,65 @@ function RecommendationPanel({
           </div>
         </article>
       </div>
-      <div className="prompt-grid">
-        <div className="prompt-block">
-          <h3>원본 사용자 프롬프트</h3>
+      <div className="rewrite-grid">
+        <div className="prompt-block original">
+          <h3>원문</h3>
           <p>{safeText(recommendation?.original_user_prompt, "선택한 run에 사용자 프롬프트가 없거나 아직 추천을 생성하지 않았습니다.")}</p>
         </div>
+        <div className="prompt-block rewritten">
+          <h3>수정본</h3>
+          <p>{safeText(recommendation?.rewritten_user_prompt, "추천을 생성하면 원문을 기반으로 다듬은 프롬프트가 표시됩니다.")}</p>
+        </div>
+      </div>
+      <div className="why-improved">
+        <SectionHeader label="변경 이유" title="원문에 적용한 패치" />
+        {patch.length ? (
+          <div className="patch-grid">
+            {patch.map((item) => (
+              <article className="patch-card" key={`${item.title}-${item.after}`}>
+                <strong>{safeText(item.title)}</strong>
+                <p>{safeText(item.reason)}</p>
+                <dl>
+                  <dt>Before</dt>
+                  <dd>{safeText(item.before)}</dd>
+                  <dt>After</dt>
+                  <dd>{safeText(item.after)}</dd>
+                </dl>
+                {item.evidence ? <small>{safeText(item.evidence)}</small> : null}
+              </article>
+            ))}
+          </div>
+        ) : (
+          <ul>
+            {(fixes.length ? fixes : issues.map((issue) => issue.recommendation)).slice(0, 6).map((item) => (
+              <li key={item}>{safeText(item)}</li>
+            ))}
+            {!fixes.length && !issues.length ? <li>추천을 생성하면 실제 진단 이슈 기반 개선점이 표시됩니다.</li> : null}
+          </ul>
+        )}
+      </div>
+      <div className="prompt-grid">
         <div className="prompt-block">
           <h3>실행 근거</h3>
           <ul>{(evidence.length ? evidence : ["추천을 만들면 이벤트 수, 오류, 검증, 시간/토큰/비용 근거가 여기에 표시됩니다."]).map((item) => <li key={item}>{safeText(item)}</li>)}</ul>
         </div>
+        <div className="prompt-block">
+          <h3>수정 요약</h3>
+          <ul>{(recommendation?.rewrite_summary?.length ? recommendation.rewrite_summary : fixes).slice(0, 6).map((item) => <li key={item}>{safeText(item)}</li>)}</ul>
+        </div>
       </div>
-      <div className="why-improved">
-        <SectionHeader label="왜 달라졌나" title="로그에서 반영한 개선점" />
-        <ul>
-          {(fixes.length ? fixes : issues.map((issue) => issue.recommendation)).slice(0, 6).map((item) => (
-            <li key={item}>{safeText(item)}</li>
-          ))}
-          {!fixes.length && !issues.length ? <li>추천을 생성하면 실제 진단 이슈 기반 개선점이 표시됩니다.</li> : null}
-        </ul>
+      <div className="mode-tabs" aria-label="추천 모드">
+        {(Object.keys(modeLabels) as RecommendationMode[]).map((mode) => (
+          <button className={recommendationMode === mode ? "active" : ""} key={mode} onClick={() => setRecommendationMode(mode)} type="button">
+            <strong>{modeLabels[mode].title}</strong>
+            <span>{modeLabels[mode].note}</span>
+          </button>
+        ))}
       </div>
+      <pre className="prompt-output selected">{safeText(modePrompt, "추천 모드를 선택하면 복사할 프롬프트가 표시됩니다.")}</pre>
       <div className="variant-grid">
         {variants.map((variant) => (
-          <article className="variant-card" key={variant.title}>
+          <article className={recommendationMode === variant.id ? "variant-card active" : "variant-card"} key={variant.title}>
             <div>
               <strong>{variant.title}</strong>
               <span>{variant.note}</span>
@@ -618,9 +895,9 @@ function RecommendationPanel({
       </div>
       <div className="copy-header">
         <SectionHeader label="복사용" title="다음 실행에 넣을 프롬프트 묶음" />
-        <button className="secondary-button" disabled={!copyPrompt} onClick={() => copyText(copyPrompt)} type="button">
+        <button className="secondary-button" disabled={!modePrompt && !copyPrompt} onClick={() => copyText(modePrompt || copyPrompt)} type="button">
           <Clipboard size={16} />
-          복사
+          선택 모드 복사
         </button>
       </div>
       <pre className="prompt-output">{safeText(copyPrompt, "추천 생성 후 복사용 system/user/tool/checklist가 표시됩니다.")}</pre>
@@ -668,6 +945,8 @@ function CapturePanel({
   setCodexScope: (value: "workspace" | "all") => void;
 }) {
   const selectedThread = codexThreads.find((thread) => thread.id === selectedThreadId) ?? codexThreads[0] ?? null;
+  const projectName = watchedProjectName(liveStatus, selectedThread);
+  const projectPath = watchedProjectPath(liveStatus, selectedThread);
 
   return (
     <Panel>
@@ -743,8 +1022,13 @@ function CapturePanel({
           {liveStatus ? (
             <div className={liveStatus.process_status === "running" || liveStatus.status === "started" ? "live-status active" : "live-status"}>
               <strong>{liveStatus.process_status === "running" || liveStatus.status === "started" ? "Codex Desktop 감시 중" : "감시 상태"}</strong>
+              <div className="live-project">
+                <span>감시 프로젝트</span>
+                <strong>{projectName}</strong>
+                {projectPath ? <small title={projectPath}>{projectPath}</small> : null}
+              </div>
               <span>run: {liveStatus.run_id || "-"}</span>
-              <small>{liveStatus.rollout_path || "선택한 Codex rollout JSONL을 따라갑니다."}</small>
+              <small>로그 파일: {liveStatus.rollout_path || "선택한 Codex rollout JSONL을 따라갑니다."}</small>
               {liveStatus.last_error ? <small className="danger-text">{liveStatus.last_error}</small> : null}
             </div>
           ) : null}
@@ -1032,8 +1316,10 @@ function App() {
   const handleStartLiveWatcher = async () => {
     setBusy(true);
     try {
-      const threadId = selectedCodexThreadId || codexThreads[0]?.id;
-      const status = await startLiveWatcher(captureMission, threadId);
+      const selectedThread = codexThreads.find((thread) => thread.id === selectedCodexThreadId) ?? codexThreads[0];
+      const threadId = selectedThread?.id;
+      const threadMission = selectedThread?.title || selectedThread?.first_user_message || captureMission;
+      const status = await startLiveWatcher(threadMission, threadId, selectedThread?.cwd);
       setLiveStatus(status);
       if (status.run_id) await reloadSelected(status.run_id);
       else await refreshRuns();
@@ -1232,6 +1518,7 @@ function App() {
             </div>
             <PromptSourcePanel detail={detail} />
             <DiagnosisPanel analysis={analysis} recommendation={recommendation} />
+            <CoachBriefPanel detail={detail} analysis={analysis} recommendation={recommendation} />
           </>
         ) : null}
 
