@@ -1,0 +1,2 @@
+{"timestamp":"2026-07-14T21:50:48+09:00","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"The final line is incomplete."}]}}
+{"timestamp":"2026-07-14T21:50:49+09:00","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"unfinished"

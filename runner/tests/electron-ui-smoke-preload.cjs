@@ -72,13 +72,85 @@ function runDetail(runId) {
 }
 
 const selectedRunId = chooseRunId();
+let importScenario = 0;
 
 contextBridge.exposeInMainWorld("flightRecorder", {
   listRuns: async () => (selectedRunId ? [runSummary(selectedRunId)] : []),
   getRun: async (runId) => runDetail(runId || selectedRunId),
   analyze: async (runId) => runDetail(runId || selectedRunId).analysis,
   recommend: async ({ runId }) => runDetail(runId || selectedRunId).recommendation,
-  listCodexThreads: async () => ({ threads: [] }),
+  listCodexThreads: async () => ({
+    threads: [
+      {
+        id: "ui-partial-thread",
+        label: "UI partial JSONL fixture",
+        title: "UI partial JSONL fixture",
+        rollout_path: "C:\\fixture\\partial-rollout.jsonl",
+        has_rollout: true,
+      },
+    ],
+  }),
+  importLatestCodexThread: async () => {
+    importScenario += 1;
+    if (importScenario === 1) {
+      return {
+        status: "partial",
+        run_id: selectedRunId,
+        events_imported: 4,
+        rollout_path: "C:\\fixture\\partial-rollout.jsonl",
+        parse_report: {
+          status: "partial",
+          path: "C:\\fixture\\partial-rollout.jsonl",
+          total_lines: 5,
+          non_empty_lines: 5,
+          parsed_lines: 4,
+          supported_lines: 4,
+          unsupported_lines: 0,
+          skipped_lines: 1,
+          issue_count: 1,
+          issues: [{ code: "INVALID_JSON", line: 3, message: "JSON 형식이 올바르지 않습니다." }],
+        },
+      };
+    }
+    if (importScenario === 2) {
+      return {
+        status: "empty",
+        run_id: null,
+        events_imported: 0,
+        rollout_path: "C:\\fixture\\empty.jsonl",
+        parse_report: {
+          status: "empty",
+          path: "C:\\fixture\\empty.jsonl",
+          total_lines: 0,
+          non_empty_lines: 0,
+          parsed_lines: 0,
+          supported_lines: 0,
+          unsupported_lines: 0,
+          skipped_lines: 0,
+          issue_count: 1,
+          issues: [{ code: "EMPTY_FILE", message: "rollout JSONL 파일이 비어 있습니다." }],
+        },
+      };
+    }
+    return {
+      status: "failed",
+      run_id: null,
+      events_imported: 0,
+      rollout_path: "C:\\fixture\\unsupported.jsonl",
+      parse_report: {
+        status: "failed",
+        path: "C:\\fixture\\unsupported.jsonl",
+        total_lines: 2,
+        non_empty_lines: 2,
+        parsed_lines: 2,
+        supported_lines: 0,
+        unsupported_lines: 2,
+        skipped_lines: 0,
+        issue_count: 1,
+        issues: [{ code: "NO_SUPPORTED_EVENTS", message: "JSONL은 읽었지만 지원하는 Codex 실행 이벤트를 찾지 못했습니다." }],
+      },
+    };
+  },
   getLiveWatcherStatus: async () => ({
     status: "stopped",
     process_status: "stopped",

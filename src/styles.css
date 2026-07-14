@@ -1098,6 +1098,57 @@ button:disabled {
   line-height: 1.55;
 }
 
+.import-feedback {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  border: 1px solid #b7d7ff;
+  border-radius: 12px;
+  color: #245a91;
+  background: #eef6ff;
+}
+
+.import-feedback.partial {
+  border-color: #f3ca7a;
+  color: #7a4300;
+  background: #fff7e6;
+}
+
+.import-feedback.failed,
+.import-feedback.empty {
+  border-color: #ffc4c4;
+  color: #8f2525;
+  background: #fff1f1;
+}
+
+.import-feedback > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.import-feedback strong {
+  display: block;
+  margin-bottom: 4px;
+  color: inherit;
+}
+
+.import-feedback p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.import-feedback ul {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.import-feedback li,
+.import-feedback small {
+  line-height: 1.5;
+}
+
 .diagnosis-template {
   display: flex;
   flex-wrap: wrap;

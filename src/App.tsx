@@ -43,6 +43,7 @@ import {
 } from "./api";
 import type {
   Analysis,
+  CodexImportResult,
   CodexThreadSummary,
   ComparisonResult,
   DiagnosisIssue,
@@ -509,6 +510,11 @@ function normalizeTimelineGroup(group: TimelineGroup): TimelineGroup {
     };
   }
   return group;
+}
+
+function readableError(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return "작업 중 알 수 없는 오류가 발생했습니다.";
 }
 
 const attemptEventTypes = new Set<EventType>(["tool_call", "tool_result", "error", "retry", "validation"]);
@@ -993,6 +999,67 @@ function RecommendationPanel({
   );
 }
 
+function ImportFeedback({ result, error }: { result: CodexImportResult | null; error: string | null }) {
+  if (!result && !error) return null;
+  if (error) {
+    return (
+      <section className="import-feedback failed" aria-live="polite">
+        <AlertCircle size={20} />
+        <div>
+          <strong>로그를 가져오지 못했습니다</strong>
+          <p>{error}</p>
+          <small>선택한 Codex 대화의 rollout 경로와 파일 접근 권한을 확인한 뒤 다시 시도하세요.</small>
+        </div>
+      </section>
+    );
+  }
+
+  const report = result!.parse_report;
+  const issueCodes = new Set(report.issues.map((issue) => issue.code));
+  const title =
+    report.status === "success"
+      ? "로그를 정상적으로 가져왔습니다"
+      : report.status === "partial"
+        ? "일부 로그를 건너뛰고 가져왔습니다"
+        : report.status === "empty"
+          ? "rollout JSONL 파일이 비어 있습니다"
+          : issueCodes.has("NO_SUPPORTED_EVENTS")
+            ? "지원하는 Codex 실행 기록이 없습니다"
+            : "로그를 분석할 수 없습니다";
+  const guidance = issueCodes.has("NO_SUPPORTED_EVENTS")
+    ? "Codex Desktop이 생성한 rollout JSONL인지 확인하세요."
+    : report.status === "partial"
+      ? "유효한 이벤트는 계속 분석했습니다. 파일이 저장 중이었다면 작업이 끝난 뒤 다시 가져오세요."
+      : report.status === "empty"
+        ? "Codex 대화에서 실제 작업을 실행한 뒤 다시 가져오세요."
+        : "문제가 계속되면 아래 줄 번호와 원인을 확인하세요.";
+  const Icon = report.status === "success" ? CheckCircle2 : AlertCircle;
+
+  return (
+    <section className={`import-feedback ${report.status}`} aria-live="polite">
+      <Icon size={20} />
+      <div>
+        <strong>{title}</strong>
+        <p>
+          전체 {report.non_empty_lines}줄 중 {report.parsed_lines}줄을 읽었고, {report.skipped_lines}줄을 건너뛰었습니다.
+          {result?.run_id ? ` ${result.events_imported}개 타임라인 이벤트를 만들었습니다.` : ""}
+        </p>
+        {report.issues.length ? (
+          <ul>
+            {report.issues.slice(0, 3).map((issue, index) => (
+              <li key={`${issue.code}-${issue.line ?? index}`}>
+                {issue.line ? `${issue.line}번째 줄: ` : ""}
+                {issue.message}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <small>{guidance}</small>
+      </div>
+    </section>
+  );
+}
+
 function CapturePanel({
   mode,
   transcript,
@@ -1308,6 +1375,8 @@ function App() {
   const [codexThreads, setCodexThreads] = useState<CodexThreadSummary[]>([]);
   const [selectedCodexThreadId, setSelectedCodexThreadId] = useState("");
   const [codexScope, setCodexScope] = useState<"workspace" | "all">("workspace");
+  const [codexImportResult, setCodexImportResult] = useState<CodexImportResult | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
 
   const analysis = detail?.analysis ?? null;
   const recommendation = detail?.recommendation ?? null;
@@ -1320,10 +1389,16 @@ function App() {
   };
 
   const refreshCodexThreads = async () => {
-    const threads = await listCodexThreads(codexScope);
-    setCodexThreads(threads);
-    if (!threads.some((thread) => thread.id === selectedCodexThreadId)) {
-      setSelectedCodexThreadId(threads.find((thread) => thread.has_rollout)?.id ?? "");
+    try {
+      const threads = await listCodexThreads(codexScope);
+      setCodexThreads(threads);
+      if (!threads.some((thread) => thread.id === selectedCodexThreadId)) {
+        setSelectedCodexThreadId(threads.find((thread) => thread.has_rollout)?.id ?? "");
+      }
+    } catch (error) {
+      setCodexThreads([]);
+      setSelectedCodexThreadId("");
+      setImportError(readableError(error));
     }
   };
 
@@ -1377,11 +1452,15 @@ function App() {
 
   const handleImport = async () => {
     setBusy(true);
+    setImportError(null);
+    setCodexImportResult(null);
     try {
       const result = await importTranscript(transcript, captureMission);
       setLastImport(`${result.run_id} · ${result.events_imported}개 이벤트`);
       await reloadSelected(result.run_id);
       setActiveTab("records");
+    } catch (error) {
+      setImportError(readableError(error));
     } finally {
       setBusy(false);
     }
@@ -1389,13 +1468,24 @@ function App() {
 
   const handleImportLatestCodexThread = async () => {
     setBusy(true);
+    setImportError(null);
+    setCodexImportResult(null);
     try {
       const selectedThread = codexThreads.find((thread) => thread.id === selectedCodexThreadId);
       const threadMission = selectedThread?.title || selectedThread?.first_user_message || captureMission;
       const result = await importLatestCodexThread(threadMission, selectedCodexThreadId || undefined);
-      setLastImport(`${result.run_id} · ${result.events_imported}개 이벤트 · Codex thread`);
-      await reloadSelected(result.run_id);
-      setActiveTab("records");
+      setCodexImportResult(result);
+      if (result.run_id) {
+        setLastImport(`${result.run_id} · ${result.events_imported}개 이벤트 · Codex thread`);
+        await reloadSelected(result.run_id);
+        setActiveTab("records");
+      } else {
+        setLastImport(null);
+        setActiveTab("import");
+      }
+    } catch (error) {
+      setImportError(readableError(error));
+      setActiveTab("import");
     } finally {
       setBusy(false);
     }
@@ -1543,6 +1633,8 @@ function App() {
             </button>
           </div>
         </section>
+
+        <ImportFeedback result={codexImportResult} error={importError} />
 
         <TabBar activeTab={activeTab} onChange={setActiveTab} />
 

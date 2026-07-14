@@ -1,5 +1,6 @@
 import type {
   Analysis,
+  CodexImportResult,
   CodexThreadSummary,
   ComparisonResult,
   ImportResult,
@@ -227,16 +228,30 @@ export async function listCodexThreads(scope: "workspace" | "all" = "workspace")
   );
 }
 
-export async function importLatestCodexThread(mission?: string, threadId?: string): Promise<ImportResult> {
+export async function importLatestCodexThread(mission?: string, threadId?: string): Promise<CodexImportResult> {
   return (
     electronApi()?.importLatestCodexThread?.({ mission, threadId }) ?? {
+      status: "success",
       run_id: `demo-rollout-${Date.now()}`,
       events_imported: 10,
+      rollout_path: "demo-rollout.jsonl",
       analysis: demoAnalysis,
       recommendation: {
         ...demoRecommendation,
         original_user_prompt: demoRecommendation.user_prompt,
         prompt_fixes: ["최근 Codex rollout에서 가져온 프롬프트를 근거로 추천합니다."],
+      },
+      parse_report: {
+        status: "success",
+        path: "demo-rollout.jsonl",
+        total_lines: 10,
+        non_empty_lines: 10,
+        parsed_lines: 10,
+        supported_lines: 10,
+        unsupported_lines: 0,
+        skipped_lines: 0,
+        issue_count: 0,
+        issues: [],
       },
     }
   );

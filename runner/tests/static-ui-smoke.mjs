@@ -20,6 +20,9 @@ const requiredTexts = [
   "다음 조종 포인트",
   "프롬프트 턴",
   "사용자 입력",
+  "일부 로그를 건너뛰고 가져왔습니다",
+  "지원하는 Codex 실행 기록이 없습니다",
+  "rollout JSONL 파일이 비어 있습니다",
 ];
 const brokenPattern = /[\uFFFD\u5360]{2,}|[?]{4,}|[媛-힣][\uFFFD]/;
 

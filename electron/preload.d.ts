@@ -1,4 +1,4 @@
-import type { Analysis, CodexThreadSummary, ComparisonResult, ImportResult, LiveWatcherStatus, Recommendation, RunDetail, RunSummary, SupervisorResult, SupervisorState, TraceEvent } from "../src/types";
+import type { Analysis, CodexImportResult, CodexThreadSummary, ComparisonResult, ImportResult, LiveWatcherStatus, Recommendation, RunDetail, RunSummary, SupervisorResult, SupervisorState, TraceEvent } from "../src/types";
 
 declare global {
   interface Window {
@@ -12,7 +12,7 @@ declare global {
       recommend(payload: { runId: string; task: string }): Promise<Recommendation>;
       compareRuns(payload: { beforeRunId: string; afterRunId: string }): Promise<ComparisonResult>;
       importTranscript(payload: { text: string; mission?: string; runId?: string; slug?: string; source?: string }): Promise<ImportResult>;
-      importLatestCodexThread(payload?: { cwd?: string; threadId?: string; mission?: string; runId?: string }): Promise<ImportResult>;
+      importLatestCodexThread(payload?: { cwd?: string; threadId?: string; mission?: string; runId?: string }): Promise<CodexImportResult>;
       listCodexThreads(payload?: { cwd?: string; limit?: number; allWorkspaces?: boolean }): Promise<{ threads: CodexThreadSummary[] }>;
       startLiveWatcher(payload?: { cwd?: string; threadId?: string; mission?: string; runId?: string; slug?: string; interval?: number }): Promise<LiveWatcherStatus>;
       stopLiveWatcher(): Promise<LiveWatcherStatus>;

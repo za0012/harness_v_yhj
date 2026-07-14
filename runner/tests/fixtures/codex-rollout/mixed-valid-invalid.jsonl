@@ -1,0 +1,4 @@
+{"timestamp":"2026-07-14T21:50:48+09:00","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Keep valid events when one line is broken."}]}}
+{"timestamp":"2026-07-14T21:50:49+09:00","type":"response_item","payload":{"type":"function_call","name":"shell_command","arguments":"{\"command\":\"pnpm run build\"}","call_id":"mixed-call"}}
+{"timestamp":"2026-07-14T21:50:50+09:00","type":"response_item","payload":{"type":"function_call_output","call_id":"mixed-call","output":"Exit code: 1\nOutput:\nbuild failed"}
+{"timestamp":"2026-07-14T21:50:51+09:00","type":"event_msg","payload":{"type":"turn_failed"}}

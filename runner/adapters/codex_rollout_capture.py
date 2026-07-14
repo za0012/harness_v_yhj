@@ -11,7 +11,7 @@ import sqlite3
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -22,6 +22,7 @@ TRACE_TOOLS = ROOT / "skills" / "agent-flight-recorder" / "scripts"
 sys.path.insert(0, str(TRACE_TOOLS))
 
 from trace_tools import analyze, append_event, init_run, read_events, recommend, record_metric, record_model_response, record_prompt  # noqa: E402
+from codex_jsonl import parse_rollout_jsonl  # noqa: E402
 from codex_tool_events import ToolAttemptTracker  # noqa: E402
 
 
@@ -216,21 +217,6 @@ def append_decision_once(run_id: str, summary: str, data: dict[str, Any], timest
     return True
 
 
-def iter_jsonl(path: Path) -> Iterable[dict[str, Any]]:
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError:
-                yield {"type": "raw", "payload": {"text": line}}
-                continue
-            if isinstance(payload, dict):
-                yield payload
-
-
 def import_rollout_file(
     rollout_path: str | Path,
     mission: str,
@@ -239,8 +225,16 @@ def import_rollout_file(
     thread_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     path = Path(rollout_path)
-    if not path.exists():
-        raise SystemExit(f"Rollout file not found: {path}")
+    items, parse_report = parse_rollout_jsonl(path)
+    if parse_report["status"] in {"failed", "empty"}:
+        return {
+            "status": parse_report["status"],
+            "run_id": None,
+            "events_imported": 0,
+            "thread_id": (thread_meta or {}).get("id"),
+            "rollout_path": str(path),
+            "parse_report": parse_report,
+        }
     created = {"run_id": run_id} if run_id else init_run(slug, mission)
     run_id = created["run_id"]
     imported = 0
@@ -248,7 +242,7 @@ def import_rollout_file(
     meta = thread_meta or {}
     tool_attempts = ToolAttemptTracker()
 
-    for item in iter_jsonl(path):
+    for item in items:
         event_type = item.get("type")
         payload = item.get("payload") or {}
         timestamp = item.get("timestamp")
@@ -345,12 +339,14 @@ def import_rollout_file(
     analysis = analyze(run_id)
     recommendation = recommend(run_id, mission)
     return {
+        "status": parse_report["status"],
         "run_id": run_id,
         "events_imported": imported,
         "thread_id": meta.get("id"),
         "rollout_path": str(path),
         "analysis": analysis,
         "recommendation": recommendation,
+        "parse_report": parse_report,
     }
 
 

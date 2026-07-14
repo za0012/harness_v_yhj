@@ -124,6 +124,36 @@ export type ImportResult = {
   recommendation: Recommendation;
 };
 
+export type RolloutParseIssue = {
+  code: string;
+  message: string;
+  line?: number;
+};
+
+export type RolloutParseReport = {
+  status: "success" | "partial" | "failed" | "empty";
+  path: string;
+  total_lines: number;
+  non_empty_lines: number;
+  parsed_lines: number;
+  supported_lines: number;
+  unsupported_lines: number;
+  skipped_lines: number;
+  issue_count: number;
+  issues: RolloutParseIssue[];
+};
+
+export type CodexImportResult = {
+  status: RolloutParseReport["status"];
+  run_id: string | null;
+  events_imported: number;
+  thread_id?: string;
+  rollout_path: string;
+  analysis?: Analysis;
+  recommendation?: Recommendation;
+  parse_report: RolloutParseReport;
+};
+
 export type CodexThreadSummary = {
   id: string;
   label?: string;

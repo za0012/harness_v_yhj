@@ -90,6 +90,41 @@ async function main() {
   assert(expandedMetrics.items.every((item) => item.text.length >= 8), "Visible timeline events include blank rows", expandedMetrics);
   assert(darkPixelCount > 10000, "Screenshot does not contain enough rendered text/detail pixels", { ...metrics, darkPixelCount });
 
+  await win.webContents.executeJavaScript(
+    `Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "가져오기")?.click()`,
+    true,
+  );
+  await waitFor(win, `Array.from(document.querySelectorAll("button")).some((button) => button.textContent?.includes("선택한 Codex 대화 가져오기"))`);
+  await win.webContents.executeJavaScript(
+    `Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.includes("선택한 Codex 대화 가져오기"))?.click()`,
+    true,
+  );
+  await waitFor(win, `document.querySelector(".import-feedback.partial")`);
+  const importFeedback = await win.webContents.executeJavaScript(
+    `document.querySelector(".import-feedback.partial")?.innerText.trim() || ""`,
+    true,
+  );
+  assert(importFeedback.includes("일부 로그를 건너뛰고 가져왔습니다"), "Partial JSONL state was not explained to the user", { importFeedback });
+  assert(importFeedback.includes("3번째 줄"), "Partial JSONL state did not expose the broken line number", { importFeedback });
+
+  await clickImportTabAndRun(win);
+  await waitFor(win, `document.querySelector(".import-feedback.empty")`);
+  const emptyImportFeedback = await win.webContents.executeJavaScript(
+    `document.querySelector(".import-feedback.empty")?.innerText.trim() || ""`,
+    true,
+  );
+  assert(emptyImportFeedback.includes("rollout JSONL 파일이 비어 있습니다"), "Empty JSONL state was not explained to the user", { emptyImportFeedback });
+
+  await clickImportTabAndRun(win);
+  await waitFor(win, `document.querySelector(".import-feedback.failed")`);
+  const unsupportedImportFeedback = await win.webContents.executeJavaScript(
+    `document.querySelector(".import-feedback.failed")?.innerText.trim() || ""`,
+    true,
+  );
+  assert(unsupportedImportFeedback.includes("지원하는 Codex 실행 기록이 없습니다"), "Unsupported JSONL state was not distinguished from malformed input", {
+    unsupportedImportFeedback,
+  });
+
   console.log(
     JSON.stringify(
       {
@@ -108,10 +143,25 @@ async function main() {
         timeline_client_height: metrics.timelineClientHeight,
         timeline_overflow_y: metrics.timelineOverflowY,
         dark_pixel_count: darkPixelCount,
+        partial_import_feedback: importFeedback,
+        empty_import_feedback: emptyImportFeedback,
+        unsupported_import_feedback: unsupportedImportFeedback,
       },
       null,
       2,
     ),
+  );
+}
+
+async function clickImportTabAndRun(win) {
+  await win.webContents.executeJavaScript(
+    `Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "가져오기")?.click()`,
+    true,
+  );
+  await waitFor(win, `Array.from(document.querySelectorAll("button")).some((button) => button.textContent?.includes("선택한 Codex 대화 가져오기"))`);
+  await win.webContents.executeJavaScript(
+    `Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.includes("선택한 Codex 대화 가져오기"))?.click()`,
+    true,
   );
 }
 

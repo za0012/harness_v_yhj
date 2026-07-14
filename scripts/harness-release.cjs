@@ -22,7 +22,7 @@ const plan = [
   { id: "static_ui_smoke", title: "정적 UI smoke", required: true },
   { id: "electron_ui_smoke", title: "Electron UI visual smoke", required: true },
   { id: "prepare_python", title: "Python runtime 준비", required: true },
-  { id: "codex_rollout_smoke", title: "Codex rollout timestamp/filter smoke", required: true },
+  { id: "codex_rollout_smoke", title: "Codex rollout/parser reliability smoke", required: true },
   { id: "python_recommend_smoke", title: "Python import/recommend smoke", required: true },
   { id: "prepare_prepackaged", title: "prepackaged 준비", required: true },
   { id: "package_portable", title: "portable exe 생성", required: true },
@@ -72,7 +72,7 @@ async function main() {
       "build passes",
       "static UI smoke passes",
       "Electron UI visual smoke passes",
-      "Codex rollout timestamp/filter smoke passes",
+      "Codex rollout timestamp/filter and parser reliability smoke passes",
       "Python import/recommend smoke passes",
       "portable exe is generated",
       "exe process survives at least 5 seconds",
@@ -115,7 +115,8 @@ async function main() {
   });
   await runStepWithRecovery({
     id: "codex_rollout_smoke",
-    command: () => `${shQuote(toBashPath(pythonPath()))} runner/tests/codex-rollout-smoke.py`,
+    command: () =>
+      `${shQuote(toBashPath(pythonPath()))} runner/tests/codex-rollout-smoke.py && ${shQuote(toBashPath(pythonPath()))} runner/tests/codex-jsonl-reliability.py`,
     timeoutMs: 60000,
   });
   await pythonRecommendSmoke(bash);
