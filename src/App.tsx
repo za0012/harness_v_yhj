@@ -511,6 +511,109 @@ function normalizeTimelineGroup(group: TimelineGroup): TimelineGroup {
   return group;
 }
 
+const attemptEventTypes = new Set<EventType>(["tool_call", "tool_result", "error", "retry", "validation"]);
+
+type TimelineEntry =
+  | { kind: "event"; event: TraceEvent; index: number }
+  | { kind: "attempt"; id: string; events: TraceEvent[]; index: number };
+
+function eventAttemptId(event: TraceEvent) {
+  if (!attemptEventTypes.has(event.type)) return null;
+  const value = event.data?.attempt_id ?? event.data?.call_id;
+  return typeof value === "string" && value ? value : null;
+}
+
+function timelineEntries(events: TraceEvent[]): TimelineEntry[] {
+  const entries: TimelineEntry[] = [];
+  const attempts = new Map<string, Extract<TimelineEntry, { kind: "attempt" }>>();
+  events.forEach((event, index) => {
+    const attemptId = eventAttemptId(event);
+    if (!attemptId) {
+      entries.push({ kind: "event", event, index });
+      return;
+    }
+    const existing = attempts.get(attemptId);
+    if (existing) {
+      existing.events.push(event);
+      return;
+    }
+    const attempt: Extract<TimelineEntry, { kind: "attempt" }> = {
+      kind: "attempt",
+      id: attemptId,
+      events: [event],
+      index,
+    };
+    attempts.set(attemptId, attempt);
+    entries.push(attempt);
+  });
+  return entries;
+}
+
+function dataText(event: TraceEvent | undefined, key: string) {
+  const value = event?.data?.[key];
+  return typeof value === "string" ? value : "";
+}
+
+function TimelineEventCard({ event, index }: { event: TraceEvent; index: number }) {
+  const Icon = eventIcons[event.type];
+  return (
+    <article className={`timeline-item ${event.type}`} key={`${event.timestamp}-${event.type}-${index}`}>
+      <div className="timeline-icon">
+        <Icon size={16} />
+      </div>
+      <div className="timeline-content">
+        <div className="timeline-title">
+          <strong>{timelineTitle(event)}</strong>
+          <time>{formatTime(eventTime(event))}</time>
+        </div>
+        <p>{safeText(event.summary)}</p>
+        {event.data && Object.keys(event.data).length > 0 ? (
+          <details>
+            <summary>원본 데이터 보기</summary>
+            <pre>{JSON.stringify(event.data, null, 2)}</pre>
+          </details>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+function ToolAttemptCard({ id, events }: { id: string; events: TraceEvent[] }) {
+  const call = events.find((event) => event.type === "tool_call");
+  const result = events.find((event) => event.type === "error" || event.type === "tool_result");
+  const retry = events.find((event) => event.type === "retry");
+  const validation = events.find((event) => event.type === "validation");
+  const failed = result?.type === "error" || dataText(validation, "validation_status") === "failed";
+  const status = failed ? "failed" : result ? "passed" : "running";
+  const statusLabel = failed ? "실패" : result ? "완료" : "결과 대기";
+  const toolName = dataText(call ?? result, "tool_name") || "도구";
+  const command = dataText(call ?? result, "command");
+  const output = dataText(result, "output");
+  return (
+    <article className={`timeline-attempt ${status}`} data-attempt-id={id}>
+      <div className="attempt-heading">
+        <div>
+          <span className="attempt-label">도구 실행</span>
+          <strong>{toolName}</strong>
+        </div>
+        <time>{formatTime(eventTime(call ?? events[0]))}</time>
+      </div>
+      <div className="attempt-badges">
+        <span className={`attempt-badge ${status}`}>{statusLabel}</span>
+        {retry ? <span className="attempt-badge retry">재시도</span> : null}
+        {validation ? <span className="attempt-badge validation">검증</span> : null}
+      </div>
+      {command ? <pre className="attempt-command">{command}</pre> : null}
+      {result ? <p className="attempt-result">{safeText(result.summary)}</p> : null}
+      {output ? <pre className="attempt-output">{output.length > 700 ? `${output.slice(0, 700)}…` : output}</pre> : null}
+      <details>
+        <summary>연결된 실행 기록 {events.length}개 보기</summary>
+        <pre>{JSON.stringify(events, null, 2)}</pre>
+      </details>
+    </article>
+  );
+}
+
 function Timeline({ detail }: { detail: RunDetail | null }) {
   const groups = useMemo(() => (detail ? timelineGroups(detail.events) : []), [detail]);
   const [openGroupIds, setOpenGroupIds] = useState<Set<string>>(new Set());
@@ -535,6 +638,7 @@ function Timeline({ detail }: { detail: RunDetail | null }) {
       {groups.map((group, groupIndex) => {
         const errorCount = group.events.filter((event) => event.type === "error").length;
         const validationCount = group.events.filter((event) => event.type === "validation").length;
+        const entries = timelineEntries(group.events);
         const isOpen = openGroupIds.has(group.id);
         return (
           <article className={isOpen ? "timeline-group open" : "timeline-group"} key={group.id}>
@@ -565,29 +669,13 @@ function Timeline({ detail }: { detail: RunDetail | null }) {
             </div>
             {isOpen ? (
               <div className="timeline-group-events">
-                {group.events.map((event, index) => {
-                  const Icon = eventIcons[event.type];
-                  return (
-                    <article className={`timeline-item ${event.type}`} key={`${event.timestamp}-${event.type}-${index}`}>
-                      <div className="timeline-icon">
-                        <Icon size={16} />
-                      </div>
-                      <div className="timeline-content">
-                        <div className="timeline-title">
-                          <strong>{timelineTitle(event)}</strong>
-                          <time>{formatTime(eventTime(event))}</time>
-                        </div>
-                        <p>{safeText(event.summary)}</p>
-                        {event.data && Object.keys(event.data).length > 0 ? (
-                          <details>
-                            <summary>원본 데이터 보기</summary>
-                            <pre>{JSON.stringify(event.data, null, 2)}</pre>
-                          </details>
-                        ) : null}
-                      </div>
-                    </article>
-                  );
-                })}
+                {entries.map((entry) =>
+                  entry.kind === "attempt" ? (
+                    <ToolAttemptCard id={entry.id} events={entry.events} key={`attempt-${entry.id}`} />
+                  ) : (
+                    <TimelineEventCard event={entry.event} index={entry.index} key={`event-${entry.event.timestamp}-${entry.index}`} />
+                  ),
+                )}
               </div>
             ) : null}
           </article>

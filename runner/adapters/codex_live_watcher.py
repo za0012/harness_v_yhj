@@ -22,7 +22,8 @@ sys.path.insert(0, str(TRACE_TOOLS))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from codex_rollout_capture import append_decision_once, find_thread, is_injected_context, record_agent_message_event, record_model_response_once, record_prompt_once, record_user_message_event, text_from_content  # noqa: E402
-from trace_tools import analyze, append_event, init_run, recommend, record_metric, record_model_response, record_prompt  # noqa: E402
+from codex_tool_events import ToolAttemptTracker  # noqa: E402
+from trace_tools import analyze, append_event, init_run, read_events, recommend, record_metric, record_model_response, record_prompt  # noqa: E402
 
 
 RUNS_DIR = Path(os.environ.get("FLIGHT_RECORDER_DIR", ROOT / ".harness" / "runs"))
@@ -60,7 +61,7 @@ def decode_line(line: str) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def mirror_rollout_item(run_id: str, item: dict[str, Any]) -> int:
+def mirror_rollout_item(run_id: str, item: dict[str, Any], tool_attempts: ToolAttemptTracker) -> int:
     event_type = item.get("type")
     payload = item.get("payload") or {}
     timestamp = item.get("timestamp")
@@ -91,22 +92,22 @@ def mirror_rollout_item(run_id: str, item: dict[str, Any]) -> int:
             if role == "user" and is_injected_context(content):
                 append_event(run_id, "decision", "Injected Codex context skipped", {"source": "codex-live", "timestamp": timestamp, "role": role}, timestamp=timestamp)
                 return 1
+            if role == "user":
+                tool_attempts.reset_retry_context()
             return 1 if record_prompt_once(run_id, str(role), content, "conversation", "codex-live", timestamp) else 0
         if payload_type == "message" and role in {"assistant", "model"}:
             return 1 if record_model_response_once(run_id, content, "codex-live", timestamp) else 0
         if payload_type in {"function_call", "tool_call", "local_shell_call"}:
-            name = payload.get("name") or payload.get("tool_name") or payload.get("call_id") or payload_type
-            append_event(run_id, "tool_call", f"{name} 호출", {"source": "codex-live", "timestamp": timestamp, "payload": payload}, timestamp=timestamp)
-            return 1
+            return tool_attempts.record_call(run_id, payload, "codex-live", timestamp, append_event)
         if payload_type in {"function_call_output", "tool_result", "local_shell_call_output"}:
-            append_event(run_id, "tool_result", "도구 실행 결과", {"source": "codex-live", "timestamp": timestamp, "payload": payload}, timestamp=timestamp)
-            return 1
+            return tool_attempts.record_result(run_id, payload, "codex-live", timestamp, append_event)
         append_event(run_id, "decision", compact(content or str(payload_type)), {"source": "codex-live", "timestamp": timestamp, "payload": payload}, timestamp=timestamp)
         return 1
 
     if event_type == "event_msg" and isinstance(payload, dict):
         payload_type = str(payload.get("type") or "")
         if payload_type == "user_message":
+            tool_attempts.reset_retry_context()
             return 1 if record_user_message_event(run_id, payload, "codex-live", timestamp) else 0
         if payload_type == "agent_message":
             return 1 if record_agent_message_event(run_id, payload, "codex-live", timestamp) else 0
@@ -165,7 +166,8 @@ def run_once(args: argparse.Namespace) -> dict[str, Any]:
     previous_path = state.get("rollout_path")
     offset = int(state.get("offset", 0)) if previous_path == rollout_path else 0
     items, next_offset = read_new_lines(Path(rollout_path), offset)
-    imported = sum(mirror_rollout_item(args.run_id, item) for item in items)
+    tool_attempts = ToolAttemptTracker(read_events(args.run_id))
+    imported = sum(mirror_rollout_item(args.run_id, item, tool_attempts) for item in items)
     analysis = analyze(args.run_id)
     recommendation = recommend(args.run_id, args.mission)
     state.update(

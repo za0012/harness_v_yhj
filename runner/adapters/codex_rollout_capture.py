@@ -22,6 +22,7 @@ TRACE_TOOLS = ROOT / "skills" / "agent-flight-recorder" / "scripts"
 sys.path.insert(0, str(TRACE_TOOLS))
 
 from trace_tools import analyze, append_event, init_run, read_events, recommend, record_metric, record_model_response, record_prompt  # noqa: E402
+from codex_tool_events import ToolAttemptTracker  # noqa: E402
 
 
 CODEX_HOME = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
@@ -245,6 +246,7 @@ def import_rollout_file(
     imported = 0
     saw_outcome = False
     meta = thread_meta or {}
+    tool_attempts = ToolAttemptTracker()
 
     for item in iter_jsonl(path):
         event_type = item.get("type")
@@ -279,6 +281,8 @@ def import_rollout_file(
                     append_event(run_id, "decision", "Injected Codex context skipped", {"source": "codex-rollout", "timestamp": timestamp, "role": role}, timestamp=timestamp)
                     imported += 1
                     continue
+                if role == "user":
+                    tool_attempts.reset_retry_context()
                 if record_prompt_once(run_id, str(role), content, "conversation", "codex-rollout", timestamp):
                     imported += 1
                 continue
@@ -287,13 +291,10 @@ def import_rollout_file(
                     imported += 1
                 continue
             if payload_type in {"function_call", "tool_call", "local_shell_call"}:
-                name = payload.get("name") or payload.get("tool_name") or payload.get("call_id") or payload_type
-                append_event(run_id, "tool_call", f"{name} 호출", {"source": "codex-rollout", "timestamp": timestamp, "payload": payload}, timestamp=timestamp)
-                imported += 1
+                imported += tool_attempts.record_call(run_id, payload, "codex-rollout", timestamp, append_event)
                 continue
             if payload_type in {"function_call_output", "tool_result", "local_shell_call_output"}:
-                append_event(run_id, "tool_result", "도구 실행 결과", {"source": "codex-rollout", "timestamp": timestamp, "payload": payload}, timestamp=timestamp)
-                imported += 1
+                imported += tool_attempts.record_result(run_id, payload, "codex-rollout", timestamp, append_event)
                 continue
             append_event(run_id, "decision", compact(content or str(payload_type)), {"source": "codex-rollout", "timestamp": timestamp, "payload": payload}, timestamp=timestamp)
             imported += 1
@@ -302,6 +303,7 @@ def import_rollout_file(
         if event_type == "event_msg" and isinstance(payload, dict):
             payload_type = str(payload.get("type") or "")
             if payload_type == "user_message":
+                tool_attempts.reset_retry_context()
                 if record_user_message_event(run_id, payload, "codex-rollout", timestamp):
                     imported += 1
                 continue

@@ -63,6 +63,82 @@ def write_rollout() -> None:
             "payload": {"type": "message", "role": "assistant", "content": "확인했습니다."},
         },
         {
+            "timestamp": "2026-07-08T15:04:35+09:00",
+            "type": "response_item",
+            "payload": {
+                "type": "function_call",
+                "name": "shell_command",
+                "arguments": json.dumps({"command": "npm --version", "workdir": "C:/fixture"}),
+                "call_id": "call-failed",
+            },
+        },
+        {
+            "timestamp": "2026-07-08T15:04:36+09:00",
+            "type": "response_item",
+            "payload": {
+                "type": "function_call_output",
+                "call_id": "call-failed",
+                "output": "Exit code: 1\nOutput:\nPowerShell execution policy blocked npm.ps1",
+            },
+        },
+        {
+            "timestamp": "2026-07-08T15:04:40+09:00",
+            "type": "response_item",
+            "payload": {
+                "type": "function_call",
+                "name": "shell_command",
+                "arguments": json.dumps({"command": "npm.cmd --version", "workdir": "C:/fixture"}),
+                "call_id": "call-retry",
+            },
+        },
+        {
+            "timestamp": "2026-07-08T15:04:41+09:00",
+            "type": "response_item",
+            "payload": {
+                "type": "function_call_output",
+                "call_id": "call-retry",
+                "output": "Exit code: 0\nOutput:\n10.9.2",
+            },
+        },
+        {
+            "timestamp": "2026-07-08T15:04:50+09:00",
+            "type": "response_item",
+            "payload": {
+                "type": "function_call",
+                "name": "shell_command",
+                "arguments": json.dumps({"command": "npm.cmd run build", "workdir": "C:/fixture"}),
+                "call_id": "call-validation",
+            },
+        },
+        {
+            "timestamp": "2026-07-08T15:04:51+09:00",
+            "type": "response_item",
+            "payload": {
+                "type": "function_call_output",
+                "call_id": "call-validation",
+                "output": "Exit code: 0\nOutput:\nbuild passed",
+            },
+        },
+        {
+            "timestamp": "2026-07-08T15:04:52+09:00",
+            "type": "response_item",
+            "payload": {
+                "type": "function_call",
+                "name": "shell_command",
+                "arguments": json.dumps({"command": "node --check src/main.js", "workdir": "C:/fixture"}),
+                "call_id": "call-syntax-validation",
+            },
+        },
+        {
+            "timestamp": "2026-07-08T15:04:53+09:00",
+            "type": "response_item",
+            "payload": {
+                "type": "function_call_output",
+                "call_id": "call-syntax-validation",
+                "output": "Exit code: 0\nOutput:\n",
+            },
+        },
+        {
             "timestamp": "2026-07-08T15:05:44+09:00",
             "type": "event_msg",
             "payload": {"type": "turn_completed"},
@@ -80,6 +156,7 @@ def main() -> None:
     user_prompts = [event for event in events if event.get("type") == "prompt" and (event.get("data") or {}).get("role") == "user"]
     model_responses = [event for event in events if event.get("type") == "model_response"]
     timestamps = [event.get("timestamp") for event in events]
+    event_counts = result["analysis"]["event_counts"]
 
     failures: list[str] = []
     if any("# AGENTS.md" in ((event.get("data") or {}).get("content") or "") for event in user_prompts):
@@ -90,6 +167,17 @@ def main() -> None:
         failures.append(f"expected one model response after dedupe, got {len(model_responses)}")
     if "2026-07-08T15:03:12+09:00" not in timestamps or "2026-07-08T15:05:44+09:00" not in timestamps:
         failures.append("original rollout timestamps were not preserved")
+    if event_counts.get("tool_call") != 4:
+        failures.append(f"expected four tool calls, got {event_counts.get('tool_call', 0)}")
+    if event_counts.get("error") != 1:
+        failures.append(f"expected one failed tool result, got {event_counts.get('error', 0)}")
+    if event_counts.get("retry") != 1:
+        failures.append(f"expected one linked retry, got {event_counts.get('retry', 0)}")
+    if event_counts.get("validation") != 2:
+        failures.append(f"expected two validation events, got {event_counts.get('validation', 0)}")
+    linked_retry = [event for event in events if (event.get("data") or {}).get("attempt_id") == "call-retry"]
+    if {event.get("type") for event in linked_retry} != {"retry", "tool_call", "tool_result"}:
+        failures.append("retry attempt events were not linked by attempt_id")
 
     payload = {
         "status": "failed" if failures else "passed",
@@ -97,6 +185,7 @@ def main() -> None:
         "events": len(events),
         "user_prompts": len(user_prompts),
         "model_responses": len(model_responses),
+        "event_counts": event_counts,
         "timestamps": timestamps[:5],
         "failures": failures,
     }
