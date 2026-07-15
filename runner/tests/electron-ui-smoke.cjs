@@ -252,5 +252,5 @@ main()
     process.exitCode = 1;
   })
   .finally(() => {
-    app.quit();
+    app.exit(process.exitCode || 0);
   });

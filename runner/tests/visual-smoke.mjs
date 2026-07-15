@@ -81,20 +81,21 @@ try {
   await page.goto(`http://127.0.0.1:${port}`, { waitUntil: "networkidle" });
 
   const checks = [];
-  checks.push(["hero", await visible(page, "작성한 프롬프트")]);
+  checks.push(["hero", await visible(page, "에이전트 실행을 기록하고 다음 프롬프트를 개선합니다")]);
   checks.push(["records", await visible(page, "시간순으로 실행을 재생합니다")]);
-  await page.getByRole("button", { name: "가져오기" }).click();
-  checks.push(["codex-import", await visible(page, "Codex 대화를 골라 run으로 가져옵니다")]);
+  await page.getByRole("button", { name: "가져오기", exact: true }).click();
+  checks.push(["codex-import", await visible(page, "Codex 로컬 대화를 run으로 변환합니다")]);
   await page.getByRole("button", { name: "로그 붙여넣기" }).click();
-  checks.push(["capture", await page.getByRole("button", { name: "로그에서 run 만들기" }).isVisible()]);
-  await page.getByRole("button", { name: "프롬프트 추천" }).click();
-  checks.push(["recommend", await visible(page, "선택한 run의 실제 약점을 넣어")]);
-  await page.getByRole("button", { name: "Before / After" }).click();
+  checks.push(["capture", await page.getByRole("button", { name: "붙여넣은 로그 가져오기", exact: true }).isVisible()]);
+  await page.getByRole("button", { name: "실행 목록", exact: true }).click();
+  await page.getByRole("button", { name: "프롬프트 추천", exact: true }).click();
+  checks.push(["recommend", await visible(page, "선택한 run의 실제 로그로 다음 프롬프트를 만듭니다")]);
+  await page.getByRole("button", { name: "Before / After", exact: true }).click();
   checks.push(["compare", await visible(page, "두 실행의 실제 지표를 비교합니다")]);
-  await page.getByRole("button", { name: "작업 노트" }).click();
+  await page.getByRole("button", { name: "작업 노트", exact: true }).click();
   checks.push(["how", await visible(page, "제품이 run을 만드는 흐름")]);
-  await page.getByRole("button", { name: "패치노트" }).click();
-  checks.push(["patch", await visible(page, "탭 구조와 긴 대화 읽기 개선")]);
+  await page.getByRole("button", { name: "패치노트", exact: true }).click();
+  checks.push(["patch", await visible(page, "지금까지 바꾼 것")]);
 
   const body = await page.locator("body").innerText();
   const broken = /[\uFFFD\u5360]{2,}|[?]{4,}|\u5A9B|\u6E72|\u7570|\u5BC3|\uF9CF/.test(body);
