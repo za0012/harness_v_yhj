@@ -150,6 +150,14 @@ const packagedAppFlow = [
 
 const patchNotes = [
   {
+    title: "2026.07.15 · rollout JSONL 신뢰성 보완",
+    body: "가져오기 결과를 success·partial·empty·failed로 구분했습니다. 손상된 줄이 섞여 있어도 유효한 이벤트는 계속 분석하고, 빈 파일이나 지원 이벤트가 없는 입력은 의미 없는 run을 만들지 않은 채 원인과 해결 방법을 안내합니다.",
+  },
+  {
+    title: "2026.07.14 · 도구 실행 흐름 연결",
+    body: "실제 Codex 로그의 function_call과 function_call_output을 call_id 기준의 실행 단위로 연결했습니다. 입력·결과·종료 코드를 한 카드에 표시하고 오류·재시도·검증을 구분해, 62개 도구 호출의 실행 흐름을 실제 run에서 확인했습니다.",
+  },
+  {
     title: "2026.07.08 · dev 빈 화면 복구",
     body: "깨진 UTF-8 문자열이 JSX와 TypeScript 문법까지 깨뜨려 Electron dev 창이 빈 화면으로 남던 문제를 정상 한국어 UI와 유효한 컴포넌트 구조로 복구했습니다.",
   },
